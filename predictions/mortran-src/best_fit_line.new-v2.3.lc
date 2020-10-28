@@ -1,0 +1,1890 @@
+%l1
+%'nloc:'='5000';
+%'nday:'='400';
+%'nk:'='200000';
+%'ilnx:'='3000';
+
+%'BEST_SLOPE'='.true.';
+%'BEST_SLOPE'='.false.';
+
+%'VERBOSE'='.true.';
+%'VERBOSE'='.false.';
+
+%'NEW_CC'='.true.';
+%'NEW_CC'='.false.';
+
+%'WGT_CC'='.true.';
+%'WGT_CC'='.false.';
+
+!                                                       ----------------
+!                                                      |  best_fit_line |
+!                                                       ----------------
+ program best_fit_line
+ 
+! read in JHU COVID data 
+
+ implicit none
+
+ common/shared/dates, last_day
+ character *10 dates(1000)
+ integer last_day
+
+ integer nloc, nt, nday, day
+ real tab_k(2,nday:,nloc:)
+ character *5 method
+ character *9  type_k(nloc:)
+ character *10  date
+ character *55 fullname(nloc:), fnamei 
+ character *10000 header
+
+ integer narg, i
+ character *60 argv(20)
+
+ call ml_argv ( narg, argv )
+
+ method = 'last'
+ for ( i = 1; i <= narg; i = i + 1 ) { 
+   output i, argv(i) ; (i5,1x,a)
+   if ( argv(i)(1:1) == '-' ) { 
+     if ( argv(i)(2:2) == 'c' || argv(i)(2:2) == 'm' ) { 
+       i = i + 1; read(argv(i),'(a)') method; next
+     }  
+   }
+ }
+ 
+ fnamei = 'Dates_for_code.txt'
+ open ( unit = 1, name=fnamei, readonly, status='OLD')
+
+ last_day = 0
+ repeat {
+   !01/23/2020      1 
+   !123456789- 234567
+   read ( 1, '(a10,i7)', err=:eofa:, end=:eofa: ) date, day
+   dates(day) = date;
+   ! output day, dates(day); ('DATE: ',i5,1x,a)
+   if ( last_day < day ) { last_day = day }
+ }
+ :eofa: continue
+
+ close ( 1 );
+ output last_day, method; ('TEST last_day= ',i4,' method= ',a)
+
+ call read_data_table ( nloc, nt, nday, 
+ tab_k, type_k, fullname, header )
+
+ stop 
+ end
+
+!                                                     ---------------
+!                                                    | Ave_Francesco |
+!                                                     ---------------
+ subroutine Ave_Francesco ( N1, N, t, moi )
+
+ implicit none
+
+ real *8 N(nday:), N1(nday:)
+ integer t, i, moi, mo
+ real SN, Sw, Na, f,N1i
+
+ mo = moi
+ mo = 1
+ mo = -10
+ if ( mo == 1 ) { N(t) = N1(t) }
+
+! Running average
+
+ else if ( mo >= 2 ) { 
+     SN = 0; Sw = 0
+     do i=t-mo, t { 
+         if ( i < 1 ) next
+         SN = SN + N1(i)
+         Sw = Sw + 1
+     }
+     N(t) = SN/Sw
+ }
+
+! Running average with limit
+
+ else if ( mo < -2 ) { 
+     f = 1.10
+     SN = 0; Sw = 0; Na = 0
+     do i=t,t-abs(mo), -1 { 
+         if ( i < 1 ) break
+         N1i =  N1(i)
+         if ( Na > 0 && N1i > Na*f ) N1i = Na*f
+         SN = SN + N1i
+         Sw = Sw + 1
+         Na = SN/Sw
+     }
+     N(t) = SN/Sw
+ }
+
+ 
+ return 
+ end
+
+
+
+!                                                     -------------------
+!                                                    | Francesco_Predict |
+!                                                     -------------------
+ subroutine Francesco_Predict ( X, nday1, fulnam1, type )
+
+ implicit none
+
+ real *8 X(nday:), H(nday:), J(nday:), N(nday:), N1(nday:)
+ real *8 U(nday:), TM(nday:), alpha(nday:)
+ real *8 V, log_alpha		! V=-1/U
+
+ integer nday1, start, starta, stopt, t, i, itrim
+ integer t1, tpl, mo
+ real *8 sum_x, sum_x2, sum_y, sum_xy, n_data, eps, 
+ sym(nday:), Xm, Nx, Xp, Xpl, fra, err, Xtlim, wgt, 
+ sum_N, sum_w, Nt, Ng, Nmax, ef, Sw, w, SNt
+
+ character *9  type
+ character *10 sN, sH, sJ
+ character *55 fulnam1
+
+ do t = 1, nday1 { H(t)=0.; J(t)=0.; N(t)=0. }
+ do t = 1, nday1 { U(t)=0.; alpha(t)=0.; TM(t)=0. }
+
+! detect plateaus
+ do t = 1, nday1 {
+     t1 = t-3
+     if ( t1 <= 0 ) { 
+        if ( VERBOSE ) {
+          output trim(fulnam1), type, t, X(t);
+          ('tt: 'a,x,a,i4,f10.1, '  - ')
+          }
+        next
+     }
+     Xm = X(t)-X(t1);   Xp = X(t)+X(t1)
+     if ( Xp == 0 ) { sym(t) = 0 }
+     else if ( Xm < 0.01*Xp ) { sym(t) = 1 }
+     else { sym(t) = int(log(Xm/7))+2 }
+     if ( VERBOSE ) {
+       output trim(fulnam1), type, t, X(t), sym(t)
+       ('tt: 'a,x,a,i4,2f10.1 )
+     }
+ }
+
+! substract plateau working backwards
+
+ do t = nday1, 2, -1 {
+     if ( X(t) < 0.2*X(nday1) && sym(t) <= 1 ) {
+         tpl = t-1; break
+     }
+ }
+ Xpl = X(tpl)
+ Xpl = 0 ! force zero plateau
+
+! debug:(nday1, tpl, X(tpl), X(nday1)|2i3,x,2f10.1)
+ do t = 1, nday1 { 
+     X(t) = X(t) - Xpl; 
+     if ( X(t) < 0 ) { X(t) = 0 }
+ }
+
+ start = -1; stopt = 0       ! start is the first day for which X[i] ~=0, stop last data point
+ do t = 1, nday1 {
+     stopt++;
+     if ( start == -1 && X(t) > 0 ) { start = t }
+ }
+
+! Crude fix.  Look at CC from all starts to stop and see when OK
+
+! generating H(t) and J(t), keep in mind that X(0)=0 and H(0),H(1),J(0),J(1) are not defined
+
+ Xtlim = 1
+ if ( type == "Confirmed" )  Xtlim = 10*Xtlim
+! debug:(start,stopt,Xtlim|2i6,x,f10.1)
+
+ eps = 0.0
+ starta = -1
+ do t = start+1, stopt {
+     H(t)=log( X(t) /( X(t-1)+eps ) +eps )
+     if ( H(t) > 0 ) { J(t)=log( H(t) ) } else { J(t) = -99.999 }
+
+     if ( VERBOSE ) {
+       output t, X(t-1), X(t), H(t), H(t-1)-H(t), J(t)
+       ('t: ',i4,' X(t)= ',2(x,f10.1),' H(t)= ',f10.1,
+       ' dH(t)= ',x,f10.4,' J(t)= ',x,f10.4)
+     }
+     if ( X(t) > Xtlim && starta < 0 ) starta = t 
+ }
+
+! fitting data up to day t* (at least 10 non zero points to start the fit) */
+
+ if ( starta < 0 ) starta = 1
+! debug:(starta|i4)
+
+ do t = starta, stopt+1 {
+     n_data = 0.0; sum_y = 0.; sum_x2 = 0.
+     sum_x = 0.; sum_xy = 0.
+  
+     do i = start+1, t { 
+         if ( H(i) > 0.00000001 ) {	     ! to avoid infinite J(t)
+             wgt = sqrt(X(i))**2
+             n_data += wgt
+             sum_y  += J(i)*wgt
+             sum_x2 += i*i*wgt
+             sum_x  += i*wgt
+             sum_xy += i*J(i)*wgt
+         }
+     }
+     	
+     log_alpha = ( sum_y*sum_x2-sum_x*sum_xy) /   &
+      ( n_data*sum_x2-sum_x*sum_x)
+
+     V = ( n_data*sum_xy-sum_x*sum_y) / &
+      ( n_data * sum_x2 - sum_x*sum_x)
+
+     U(t) = -1/V
+
+     log_alpha = J(t)+t/U(t)
+     alpha(t)  = exp(log_alpha)
+     TM(t) = U(t)*log(alpha(t)*U(t))
+     if ( VERBOSE ) {
+       debug:(t, int(n_data), alpha(t), U(t), TM(t) | 2i3,x,4f10.3)
+     }
+
+     N1(t) = X(t) * exp(alpha(t)*U(t)*exp(-t/U(t)))
+
+!     N(t) = (log(alpha(t))-t/U(t))*exp(alpha(t)*U(t)*exp(-t/U(t)))
+
+!     N(t) = (log(alpha(t)*U(t))-t/U(t)) *    &
+!     exp(alpha(t)*U(t)*exp(-t/U(t)))
+
+! ==============================================================================
+     if ( .false. ) { 
+     sum_N = 0; sum_w = 0
+     Ng = N(t); Nmax = 1000000;  Ng = Nmax
+     do i = start+1, t { 
+         if ( H(i) > 0.00000001 ) {	     ! to avoid infinite J(t)
+             Nt = X(i) * exp(alpha(t)*U(t)*exp(-i/U(t)))
+!C             wgt = sqrt(X(i)); lNt = log(Nt); sum_N += wgt*lnt
+!A             wgt = sqrt(X(i)); sum_N += wgt*Nt
+!B            wgt = 1; expN = exp(-N(t)/Ng); sum_N += wgt*expN
+             sum_w += wgt
+         }
+     }
+!C     N(t) = exp(sum_N/sum_w)
+!A     N(t) = sum_N/sum_w
+!B     N(t) = -Ng*log(sum_N/sum_w)
+
+     if (t >= 7 ) { N(t)=0;do i=t- 6,t { N(t)+=N1(i)/7. }}  ! <<<=== 7-day running average
+     if (t >= 10) { N(t)=0;do i=t- 9,t { N(t)+=N1(i)/10. }}  ! <<<=== 10-day running average
+     if (t >= 21) { N(t)=0;do i=t-20,t { N(t)+=N1(i)/21. }}  ! <<<=== 21-day running average
+
+     if (t >= 21) { SNt=0;Sw=0; do i=t-20,t { 
+ ef=0.25;w=exp(-ef*(i-t));Sw=Sw+w;SNt=SNt+w*N1(i)};N(t)=SNt/Sw}  ! <<<=== down-weighted average
+}
+! ==============================================================================
+
+     call ave_Francesco(N1,N,t,mo)
+     if ( N(t) < X(t) ) N(t) = X(t)  ! Limit N(t) to be >= X(t)
+
+ }
+     Nx = X(nday1)
+!GNU:   t     X(t)          Ht      J(t)       N(t)          N(t)     U(t)   alpha(t)      TM(t)     Loc  Type         Frac      Err
+!GNU:  74     1581.0     .0927   -2.3782     9636.8  .96368E+04     19.494      4.128     85.540 Germany Deaths       17.40     6.09
+
+     output type
+     ('GNU:   t     X(t)          Ht      J(t)       ',
+     'N(t)          N(t)     U(t)   alpha(t)      ',
+     'TM(t)     Loc ',a, ' Frac      Err')
+
+
+     do t = 1, stopt {
+         N(t) = N(t) + Xpl  ! add back first plateau
+         X(t) = X(t) + Xpl
+         if ( N(t) < 1 ) N(t) = 1
+         if ( N(t)<2*X(nday1) ) {  
+             write(sN,'(f10.1)')N(t)} else {sN = ' - ' }
+
+         if (H(t)>0.000001) {
+             write( sH,'(f10.4)' ) H(t)
+             write( sJ,'(f10.4)' ) J(t)
+         } else { sH = ' - '; sJ = ' - ' }
+
+         if ( Nx > 0 ) { 
+             fra = 100*X(t)/Nx    
+             err = 100*abs(N(t)-Nx)/Nx
+         }
+         output t, X(t), sH, sJ, sN, N(t), U(t), alpha(t), TM(t),
+         trim(fulnam1), type, fra, err
+         ('GNU: ', i3, x,f10.1, 2a10,x,a10, e12.5,3(x,f10.3),
+          x,a,x,a,2(x,f8.2) )
+     }
+
+ return
+ end
+
+
+
+!                                                     -----------------
+!                                                    |  get_best_slope |
+!                                                     -----------------
+ subroutine get_best_slope ( xvk, yvk, ltab, nday1, slopes, lim )
+
+ implicit none 
+
+ integer nday1, first, last, lim(2)
+ real *8 xvk(nday:), yvk(nday:), slopes(10), ltab(nday:,2)
+ real *8 M, sumx, sumy, sumx2, sumy2, sumxy, ccR
+ real *8 intcR, slopR, x1, y1, cc1, cc1_max,
+ M_max, slope_best, N_pred1, N_pred2, alpha, U, T
+
+ integer i
+
+ if ( .false. ) { 
+   do i = 1, nday1 { 
+     output i, xvk(i), yvk(i); 
+     ('best_slope_test: i, xvk(i), yvk(i)',i5,2(x,f10.3))
+   }
+ }
+
+ do last = 20, nday1 { 
+     cc1_max = 0
+     first = last - 19
+     M = 0; sumx = 0; sumy = 0; 
+     sumx2 = 0; sumy2 = 0; sumxy = 0
+
+     do i = first, last { 
+         x1 = xvk(i)
+         if ( x1 < 0 ) next 
+         y1 = yvk(i)
+         M = M+1
+         sumx  += x1;     sumy += y1
+         sumx2 += x1*x1; sumy2 += y1*y1
+         sumxy += x1*y1
+         !debug:(first,last,i,int(M),x1,y1|4i4,x,2f10.4)
+     }
+     slopR = (M*sumxy - sumx*sumy)/(M*sumx2 - sumx**2)
+     intcR = (sumy * sumx2 - sumx*sumxy )/ (M*sumx2 - sumx**2)
+     !debug:(slopR,intcR|2f10.2)
+     ccR = (sumxy - sumx*sumy/M) /  &
+     sqrt( (sumx2 - sumx**2/M)*(sumy2 - sumy**2/M))
+     ccR = abs(ccR)
+
+     cc1 = ccR - 0.01/sqrt(M)
+     cc1_max = cc1
+     M_max = M
+     U = -1/slopR
+     alpha = exp(intcR)  ! This is J(t) at t=0
+     T = U*log(alpha*U)
+
+     N_pred1 = ltab(last,2)*exp(alpha*U*exp(-last/U))
+     N_pred2 = ltab(last,2)*exp(exp(-(last-T)/U))
+
+     if ( N_pred1 > 10000000 ) N_pred1 = 10000000
+     if ( N_pred1 < 1 ) { N_pred1 = 1; N_pred2 = 1 }
+     if ( abs(N_pred2) > 10000000 ) N_pred2 = 10000000
+     output last, int(ltab(last,2)), xvk(last), yvk(last), 
+     cc1_max, ccR, first, int(N_pred1), int(N_pred2),
+     int(M_max), U, T, 
+     intcR, alpha
+     ( 'GB ', i3, i10, f6.0, f8.3,
+     ' cc= ',2f12.6,' first= ',i3,' Np= ',2i15,x,
+     ' n= ',i3,' U= ',f8.2,' T= ',f7.1,
+     ' intcR= ',f8.2,' alpha= ',f8.2)
+ }
+
+ slopes(1) = slope_best
+
+ return
+ end
+
+
+!                                                     -------------------
+!                                                    | process_data_line |
+!                                                     -------------------
+
+ subroutine process_data_line ( nloc, fulnam1, 
+ nday, type, ic, tab1 )
+
+! read JHU data table pepared by JHU_FORTRAN.sh
+
+ implicit none
+
+ common/shared/dates, last_day
+ character *10 dates(1000)
+ integer last_day
+
+ integer nloc, nday, ic, end_day,
+ pred_il(nday:), histx(nday:), iv1x(nday:), write_il(nday:), 
+ iv1_mn(nday:), iv1_mx(nday:), iv1_me(nday:)
+
+ real tab1(nday:)
+
+ character *6  mode
+ character *9  type, string, strin1
+ character *10 date_last, datesk(1000)
+ character *55 fulnam1
+ 
+ integer i, k, nday1, first, last, maxxX, predX, currX, nk
+ integer il, ilp, predx_max, ivh, iv1, hist(1001), ihi,
+ iv1_ihi(1000), ilpx, i_ihi(1000), ih, ih_ilp(nday:),
+ nh_ilp(nday:), first1, lim(2), iloop, kx1
+
+ real *8 v, ltab(nday:,2), x1, x2, y1, y2, slope, X(nday:)
+ real *8 xvb(nday:), yvb(nday:), predict, now, percent
+ real *8 ccmax, ccmax1, lnx_max, sumi, del_day, per_comp
+ real *8 T_value, M, sumx, sumy, sumx2, sumy2, sumxy, ccR
+ real *8 intcR, slopR, TvR, endR, lnHr8(nday:), slopes(10)
+
+ real *8 ccmax_k(nk:), ccmax1_k(nk:), lnx_max_k(nk:), slope_k(nk:),
+ percent_k(nk:), per_comp_k(nk:), x1_k(nk:), x2_k(nk:), y1_k(nk:), 
+ y2_k(nk:), T_value_k(nk:), sdx, sdy, frac, eCon, eMed, ccmax1k
+
+ real *8 vals(nk:), v0, v1, f, sW, sN
+ character *9 lnH(nday:)
+ character *200 header
+
+ integer first_k(nk:), last_k(nk:), maxxX_k(nk:), predX_k(nk:),
+ currX_k(nk:), end_day_k(nk:), indx(nk:), k1, m_limit, 
+ ivh_k(nk:), iloop_k(nk:), N(nday:), N1(nday:), i, mo,
+ N1i, t, Na
+
+ integer itrim
+
+ logical first_Zt
+
+ first_Zt = .true.
+
+ if ( VERBOSE || .true. ) { 
+   output nloc, fulnam1, nday, type, ic, (tab1(i),i=1,5),
+   (tab1(i),i=nday-2,nday)
+   ('MP: ',i5,1x,a55,1x,i5,1x,a9,1x,i2,3x,1000f12.1)
+ }
+
+! get log of values adding 0.0001 to stop log of 0.0
+
+ 
+! Test Francesco method
+ do i = 3, nday { X(i-2) = tab1(i) }
+
+ call Francesco_Predict ( X, nday-2, fulnam1, type )
+
+ 
+ do i = 3, nday { 
+   v = tab1(i)+0.00001
+   ltab(i-2,2) = v
+   ltab(i-2,1) = log(v)
+!   debug:(i-2,ltab(i-2,1),ltab(i-2,2),tab1(i)|i4,1x,2f13.3,f12.1)
+ }
+ nday1 = nday-2
+
+ do i = 1, nday1 { 
+   if ( ltab(i,1) > 0 ) { first1 = i; break }
+ }
+
+! NEW 14 JUNE 2020
+! ================
+
+! get log of log X(t)/X(t-1) for t = 2 adding 0.0001 to stop log of 0.0
+
+ lnH(1) = '    -   '
+ !output  trim(fulnam1)//"="//type,1,lnH(1)
+ !('lnH1: ',a,1x,i3,1x,a)
+
+ do i = 2, nday1 { 
+   xvb(i) = i
+   v0 = log(ltab(i-1,2)+0.00001)  ! Add 0.0001 to stop log of -ve
+   v1 = log(ltab(i,  2)+0.00001)
+   write(lnH(i),'(1x,f8.4)') log(v1-v0+0.0001);
+   lnHr8(i) = log(v1-v0+0.0001);   ! ln of change in ln
+   if ( ltab(i-1,2) < 1 ) { lnH(i) = '    -   '; xvb(i) = -1 }
+   if ( ltab(i-1,2) >= ltab(i,2) ) { lnH(i) = '    -   '; xvb(i) = -1 }
+
+ if ( i == 2 ) lnHr8(1) = lnHr8(2)
+ if ( .false. ) { 
+     output  trim(fulnam1)//"="//type,i,
+     ltab(i-1,2), ltab(i,2) , v0, v1, v1-v0, 
+     lnH(i), 
+     lnHr8(i), lnHr8(i)-lnHr8(i-1)
+     ('lnH1: ',a,1x,i3,' v= ',2f10.1,x,' lv= ',2f10.4, ' dlv= ',f10.4,
+     ' J= ',a,f12.4, ' dJ= ',f12.4)
+ }
+!    debug:(i,ltab(i-1,2),ltab(i,2),lnH(i)|i4,1x,2f13.0,1x,a)
+ }
+
+ xvb(1) = xvb(2)-1; lnHr8(1) = lnHr8(2)
+
+ if ( BEST_SLOPE ) { 
+     output; ('call get_best_slope' )
+     call get_best_slope ( xvb, lnHr8, ltab, nday1, slopes, lim )
+ }
+
+ lnH(1) = lnH(2)
+ output  trim(fulnam1)//"="//type,1/slopes(1),lim,
+ (lnH(i),i=1,nday1)
+ ('lnH: ',a,1x,' U= ',f8.2,2i4,1x,200a)
+
+ if ( .false. ) { return }  
+ 
+! =================================================================
+! =================================================================
+
+
+! Clear iv1x
+ do i = 1, nday1 { iv1x(i) = 0 }
+
+ do i = 1, nday1 { 
+   datesk(i) = dates(i); 
+   if ( mod(i,7) ~= 2 ) datesk(i) = "."   ! Same as 4 Panel plots
+ }
+ output nday1, dates(nday1), ltab(nday1,2),ltab(nday1,1); 
+ ('ML aaa nday1',i5,1x,a10,1x,2f15.5)
+
+ first = 1; last = nday1
+ nk = 0
+ for ( last = nday1; last > 5; last = last - 1 ) { 
+   for ( first = last - 5; first >= 1; first = first - 1 ) { 
+     if ( ltab(first,1) < 0 ) next
+
+if ( WGT_CC ) { 
+     call get_cc_W ( ccmax, lnx_max, nday1, ltab, 
+     first, last, xvb, yvb, iloop )
+}
+else {
+if ( ~NEW_CC ) { 
+     call get_cc ( ccmax, lnx_max, nday1, ltab,
+     first, last, xvb, yvb, iloop )
+!     debug:(ccmax|f10.5)
+}
+else {
+     call get_cc_new ( ccmax, lnx_max, nday1, ltab, 
+     first, last, xvb, yvb, iloop )
+}
+}
+     if ( ccmax < 0 ) next  ! Fail to find CC with >= 7 points
+     ccmax = abs(ccmax)
+     
+     M = 0; sumx = 0; sumy = 0; 
+     sumx2 = 0; sumy2 = 0; sumxy = 0
+     do i = first, last { 
+         x1 = xvb(i)
+         if ( x1 < 0 ) next 
+         y1 = yvb(i)/20.0; 
+         M = M+1
+         sumx  += x1;     sumy += y1
+         sumx2 += x1*x1; sumy2 += y1*y1
+         sumxy += x1*y1
+     }
+  
+     sdx = sqrt(M*sumx2 - sumx**2)
+     sdy = sqrt(M*sumy2 - sumy**2)
+     slopR = (M*sumxy - sumx*sumy)/(M*sumx2 - sumx**2)
+
+     intcR = (sumy * sumx2 - sumx*sumxy )/ (M*sumx2 - sumx**2)
+
+     ccR = (sumxy - sumx*sumy/M) /  &
+          sqrt( (sumx2 - sumx**2/M)*(sumy2 - sumy**2/M))
+
+     TvR = -intcR/slopR
+     y1 = yvb(first)/20.0; y2 = yvb(last)/20.0
+     x1 = xvb(first);      x2 = xvb(last)
+
+     slope = 999.0;
+     if ( abs(x1-x2) > 0 ) { slope = ( y2 - y1 ) / ( x2 - x1 ) }
+   
+     if ( VERBOSE ) { 
+       output trim(fulnam1), type, ccmax, first, last, x1, x2
+       ('ML return get_cc: ',a,1x,a' cc= ',f10.7,' first,last= ',
+       2i5,' x1 ',f10.5,' x2 = ',f10.5)
+     }
+
+     now = int(ltab(nday1,2))
+     predict =  int(exp(lnx_max))
+     percent = 100*(predict/now-1.0)
+     per_comp = 100*now/predict
+  
+     sumi = last-first+1
+     predX = int(exp(lnx_max))
+     currX = int(ltab(last,2))
+     maxxX = int(ltab(nday1,2))
+     ccmax1 = ccmax - 1/sqrt(sumi)  ! subtract one SD to be cautious
+
+!     debug:(first,last,slopR,slope, ccR,ccmax, intcR, TvR|2i5,6f10.5)
+
+       if ( sdx/sdy > 1000.0 || sdx/sdy < 0.001 ) { ! must be accurate determination of slope
+           TvR = -99.9; slopR = 1/99.99
+       }  
+
+! -----------------------------------------------------------------------------------------------
+     if ( ccmax1 > 0.50 && predX >= currX ) {   ! ===== Acceptance criterion.  WAS && TvR ~= -99.9
+
+
+       del_day = 0; date_last = ""
+       if ( slope > 0 ) { 
+         T_value = -(y1-x1*slope)/(slope)
+! Get the predicted day when N/X(t) == 0.99.  This means, log(log(1/0.99)) = -2.36
+         del_day = ( 2.36 - y2 )/slope   ! log10(log10(1/0.95)) = -1.65 ; log(log(1/0.99)) = -2.36
+       }
+       end_day = int(last + del_day) 
+       endR = (2.36-intcR)/slopR
+
+
+! ===============================================
+if (.false.) { 
+    debug:(sdx, sdy | 2f20.5)
+    debug:(first,last, slopR,slope, ccR,ccmax, 
+    intcR, TvR, T_value, endR,end_day|2i5,8f10.5,i5) 
+}
+! ===============================================
+
+! Use new values
+
+       end_day = endR
+       T_value = TvR
+       slope= slopR
+
+       if ( end_day > 0 && end_day < last_day  ) { 
+         date_last = dates(end_day); 
+         if (  date_last == ""  ) { date_last = "future" } 
+       } else {  date_last = "undefine" }
+
+       nk = nk + 1
+
+       slope = 1.0/slope
+       ccmax_k(nk) = ccmax; ccmax1_k(nk) =ccmax1
+       lnx_max_k(nk) = lnx_max
+       first_k(nk) = first; last_k(nk) = last
+       maxxX_k(nk) = maxxX; predX_k(nk) = predX; currX_k(nk) = currX
+       slope_k(nk) = slope; T_value_k(nk) = T_value; 
+       percent_k(nk) = percent
+       per_comp_k(nk) = per_comp; end_day_k(nk) = end_day
+       x1_k(nk) = x1; x2_k(nk) = x2; y1_k(nk) = y1; y2_k(nk) = y2  
+       iloop_k(nk) = iloop
+
+       if ( VERBOSE ) { 
+         output nloc, trim(fulnam1), type, 
+         ccmax, ccmax1, lnx_max,
+         first, last, last-first+1,
+         maxxX, predX, predX, predX,
+         slope, percent, per_comp, 
+         end_day, date_last, 
+         x1, x2, y1, y2
+
+         ( 'aaa ',i5,1x,a,1x,a,' cc1=',f12.9,' cc2= ',f12.9,
+         ' lx= ',f12.5,' if= ',i3,' il= ',i3,' n= ',i3,
+         ' now= ',i9,' end= ',3i12,' U= ',f8.2,
+         ' p1= ',f7.1,' p2= ',f9.1,' ed= ',i5,1x,a10,
+         '  x1= ',f5.0,' x2= ',f5.0,' y1= ',f8.2,' y2= ',f8.2)
+       }   ! if ( VERBOSE) 
+
+     }   ! if ( ) acceptance
+   }  ! first loop
+ }    ! last loop
+
+! Now process the data
+
+! sort the data by increasing predX_k(k) for a given end day.
+
+ do k = 1, nk { 
+   indx(k) = k; 
+   vals(k) = -(predX_k(k) + last_k(k)*10000000.0d0)
+ }
+
+! debug:(nk|i4)
+ call qisort ( vals, indx, nk )
+ 
+! Get the histograms using the sorted data
+! Need to get the k values of the lines that are used for most propabable
+ ilp= 0; ilpx = 0
+ do i = 1, 1000 { hist(i) = 0 }
+ do i = 1, nday: { histx(i) = 0;  nh_ilp(i) = 0 }
+ do k = 1, nk { 
+   k1 =  indx(k)
+   il = last_k(k1)
+   if ( il ~= ilp ) { 
+     if ( ilp > 0 ) { 
+       ihi = 0 
+ 
+       pred_il(ilp) = 0
+       do ih = 1, 200 { 
+         if ( hist(ih) > 0 ) { 
+           iv1 = (ih-0.5)*predX_max/200.0    ! There are two hundred bins for the full range
+           if ( histx(ilp ) < hist(ih) ) {   ! most common histogram value
+             histx(ilp) = hist(ih)
+             iv1x(ilp) = iv1
+             ih_ilp(ilp) = ih               ! This is the most probabe histogram bin for ilp
+           }
+           ihi = ihi+1
+           iv1_ihi(ihi) = iv1
+           i_ihi(ihi) = ih
+         }
+       }   
+       if ( ilpx < ilp ) { ilpx = ilp }
+
+       if ( VERBOSE ) { 
+         output ilp, ih_ilp(ilp), ihi 
+         ('HIST:     ilp= ',2i5,' L ihi =',i5)
+       }
+
+       ! set minimum, median, maximum
+       if ( ihi > 0 ) { 
+         iv1_mn(ilp) =  iv1_ihi(1)
+         iv1_mx(ilp) =  iv1_ihi(ihi)
+         iv1_me(ilp) =  iv1_ihi(1+ihi/2)
+       }
+       else { 
+         iv1_mn(ilp) = 0
+         iv1_mx(ilp) = 0
+         iv1_me(ilp) = 0
+       }
+       if ( VERBOSE ) { 
+         do i = 1, ihi {
+           output type,ilp,ih_ilp(ilp),i,ihi,hist(i_ihi(i)),histx(ilp),
+           iv1_ihi(i), iv1x(ilp)
+           ('HIST: ', a,' ilp,ij= ',i4,' L ',i4,' i,ihi= ',2i3,
+           ' h,hx= ',2i4, ' v,vx= ',6i8)
+         }
+       }
+     }   ! if ilp > 0
+
+     ilp = il
+     do i = 1, 1000 { hist(i) = 0 }
+     predX_max = predX_k(k1)
+
+   }     ! if  il ~= ilp
+
+   !debug:(k1,predX_k(k1)|2i8)
+
+   ivh = 1+200.0*(float(predX_k(k1))/predX_max)
+   hist(ivh) = hist(ivh) + 1
+   ivh_k(k1) = ivh  ! ivh_k(k) is the histogram bin for line k
+   nh_ilp(ilp) =  nh_ilp(ilp)+1
+
+   if ( VERBOSE ) { 
+     output k, k1, last_k(k1), ivh_k(k1), hist(ivh),
+     vals(k), predX_k(k1), il, predX_max
+     ('SORT ',3i5,' L  ',2i6,f14.1,3i8)
+   }
+ }  ! k loop
+
+! Find the line with the highest value of ccmax1_k(nk) 
+
+ ccmax1k = 0
+ do k = 1, nk { 
+     if ( ccmax1k < ccmax1_k(k) ) { ccmax1k = ccmax1_k(k); kx1 = k }
+ }
+
+! =======================================================================================================================================
+! =======================================================================================================================================
+! =======================================================================================================================================
+
+! write out the TAB data table
+! ---------------------------
+ output trim(fulnam1), type
+ ('TAB: ',1x,a,1x,a,1x,'Date   Day     Real      MAX  ',
+  'Predict    Count      Min      Max      Med      ',
+  ' Frac      eCon       eMed')
+
+!TAB:  Germany Confirmed Date        Day     Real      MAX  Predict    Count      Min      Max      Med       Frac      eCon       eMed
+!TAB:  Germany Confirmed 7/10/2020   170   199332   199332   203787       28   203787   840003   293255       .4789     1.6067    33.6965 
+
+ m_limit = 10.0*ltab(nday1,2)
+
+! Back average N1(t) as done in  Ave_Francesco
+
+ mo = 10; f = 1.10
+ do t = 1, nday1 { 
+     N1(t) = iv1x(t) 
+     if ( mo  == 0 ) next
+     SN = 0; Sw = 0; Na = 0
+     do i = t, t-mo, -1 { 
+         if ( i < 1 ) break
+         N1i =  N1(i)
+         if ( Na > 0 && N1i > Na*f ) N1i = Na*f
+         SN = SN + N1i; Sw = Sw + 1; Na = SN/Sw
+     }
+     N(t) = SN/Sw
+ }
+
+ do ilp = 1, nday1 {
+!   debug:(ilp,n(ilp)|2i12)
+
+   string = '    -     '
+   if (N(ilp) < m_limit ) { write (string,'(i9)' ) N(ilp) }  ! Skip if N(t) > m_limit
+   if (N(ilp) < ltab(ilp,2)) {write(string,'(i9)') int(ltab(ilp,2)) }  ! N(t) > X(t)
+
+   frac = ltab(ilp,2)/ltab(nday1,2)
+   eCon = 100*(iv1x(ilp)-ltab(nday1,2)) / ltab(nday1,2)
+   eMed = 100*(iv1_me(ilp)-ltab(nday1,2)) / ltab(nday1,2)
+   output  trim(fulnam1), type, datesk(ilp), ilp, 
+   int(ltab(ilp,2)),int(ltab(nday1,2)), string,
+   histx(ilp), iv1_mn(ilp), iv1_mx(ilp),iv1_me(ilp),
+   frac, eCon, eMed
+
+   ('TAB: ',1x,a,1x,a,1x,a10,i5,2i9,a9,4i9,3f10.4)
+}
+
+! print the saved data
+
+ do i = 1, nday: { write_il(i) = 0 }
+ ilp = 0
+! do k1 = 1, nk {
+ do k1 = nk, 1, -1 {   ! Reverse the order
+
+
+!   k = indx(k1);
+   k = k1   
+! No sorting test
+
+   end_day = end_day_k(k)
+   date_last = ""
+   if ( end_day > 0 && end_day < last_day  ) { 
+     date_last = dates(end_day); 
+     if (  date_last == ""  ) { date_last = "future" } 
+   } 
+   else { end_day = 999; date_last = "undefine" }
+
+   ilp = last_k(k)
+   lnx_max = lnx_max_k(k)
+
+   ! Mark data as best if its rounded value for histogram is matched
+   ! ih_ilp(ilp) is the number of the most probable histogram bin
+   ! ivh_k(k) is the histogram bin for line k
+
+   mode = 'xxxx'; if ( ivh_k(k) == ih_ilp(ilp) ) { mode = 'BEST' }  
+   if ( VERBOSE) { 
+      debug:( ilp,k,ih_ilp(ilp),ivh_k(k),mode | 4i6,1x,a)
+   }
+
+   if ( .true. || date_last ~= "undefine" ) { 
+
+
+     if ( ~NEW_CC && mode == 'BEST' ) { 
+       output nloc, trim(fulnam1), type, 
+       ccmax_k(k), ccmax1_k(k), lnx_max_k(k),
+       first_k(k), last_k(k), dates(last_k(k)), 
+       last_k(k)-first_k(k),
+       maxxX_k(k), predX_k(k), currX_k(k), iv1x(ilp),
+       slope_k(k), T_value_k(k),
+       percent_k(k), per_comp_k(k), end_day, date_last, 
+       x1_k(k), x2_k(k), y1_k(k), y2_k(k), mode
+
+       ( 'AAA1 ',i5,1x,a,1x,a,' cc1= ',f8.6,' cc2= ',f8.6,' lx= ',
+       f8.5,' if= ',i3,' il= ',i3,1x,a10,' n= ',i3,' now= ',i9,
+       ' thsP= ',i10,' then= ',i10,' conP= ',i10, 
+       ' U= ',f8.2,' T= ',f8.1,' p1= ',f5.1,
+       ' p2= ',f7.1,' ed= ',i5,1x,a10,'  x1= ',f4.0,' x2= ',
+       f4.0,' y1= ',f5.2,' y2= ',f5.2,1x,a)
+
+       if ( .false. ) {    ! STOP reine_cc as selective.  Treat all predictions the same.
+          call refine_cc ( ccmax, lnx_max, nday1, ltab, 
+          first_k(k), last_k(k), xvb, yvb )
+          ccmax = abs(ccmax)
+          ccmax_k(k) = ccmax;  lnx_max_k(k) = lnx_max
+       }
+
+     }
+
+! Mark the first line of each new ilp 
+     if ( k== nk || last_k(k) > last_k(k+1) ) mode(5:6) = "F1"
+
+     output nloc, trim(fulnam1), type, 
+     ccmax_k(k), ccmax1_k(k), lnx_max_k(k),
+     first_k(k), last_k(k), dates(last_k(k)), 
+     last_k(k)-first_k(k),
+     maxxX_k(k), predX_k(k), currX_k(k), iv1x(ilp),
+     slope_k(k), T_value_k(k),
+     percent_k(k), per_comp_k(k), end_day, date_last, 
+     x1_k(k), x2_k(k), y1_k(k), y2_k(k), mode, histx(ilp), 
+     nh_ilp(ilp), iloop_k(k)
+
+     ( 'AAA2 ',i5,1x,a,1x,a,' cc1= ',f8.6,' cc2= ',f8.6,' lx= ',f8.5,
+     ' if= ',i3,' il= ',i3,1x,a10,' n= ',i3,' now= ',i9,
+     ' thsP= ',i10,' then= ',i10,' conP= ',i10, 
+     ' U= ',f8.2,' T= ',f8.1,' p1= ',f5.1,' p2= ',f7.1,
+     ' ed= ',i5,1x,a10,
+     '  x1= ',f4.0,' x2= ',f4.0,' y1= ',f5.2,' y2= ',f5.2,1x,a,
+     ' histx= ',2i3,' iloop= ',i6)
+
+! 17 June 2020.  Write out Z(t) for all BEST lnN of final day1 of data
+
+     if ( k == kx1 ) { 
+         write ( header, "(a,'=',a,'_',f8.6,'_',i6,',lnN:',f7.4,
+         ',e:',i6,',M:',i10,',N:',i10,',U:',f6.2,',T:',f5.1)") &
+         trim(fulnam1), type(1:1), ccmax_k(k), last_k(k)-first_k(k)+1,
+         lnx_max_k(k), last_k(k), maxxX_k(k), predX_k(k), slope_k(k), 
+         T_value_k(k)
+
+! Zt: Germany Deaths     .998039  9.11996 s:   84 e:  171 p:     9133   19.72    77.6 Deaths=088 U=      inf   0   0
+         call output_cc1( ccmax_k(k), lnx_max_k(k), nday1, ltab, 
+         first_k(k), last_k(k), header )
+         first_Zt = .false.  ! Just write out first line, the mosty global fit.
+     }
+
+     if ( .false. && ilp == nday1 && mode == 'BEST') {    ! Change to get Fig. 2S data BL
+         call output_cc (lnx_max_k(k), nday1, ltab, first_k(k), 
+         last_k(k))
+     }
+
+   }
+
+!GP: Deaths   FullName 5/28/2020       127    1639    1829    1639    1760
+
+   if ( k1 == 1 ) { 
+      output type, trim(fulnam1)
+      ('GP: ',a,1x,a,
+      ' Dates           Day     Max  Predict Current   ',
+      ' Bpred  Count eDay EndDate')
+   }
+ 
+   string = '    -     '
+   if ( iv1x(ilp) < m_limit ) { write (string,'(i9)' ) iv1x(ilp) }
+   strin1 = '    -     '
+   if ( predX_k(k) < m_limit ) { write (strin1,'(i9)' ) predX_k(k) }
+
+   output type, trim(fulnam1), dates(ilp), ilp, maxxX_k(k), 
+   strin1, currX_k(k), string, histx(ilp), end_day, date_last
+   ('GP: ',a9,1x,a,x,a10,1x,i8,x,i8,x,a9,x,i8,x,a9,x,
+   i6,x,i6,x,a10)
+ }
+
+ return
+ end
+
+
+!                                                     -----------
+!                                                    | output_cc1 |
+!                                                     -----------
+ subroutine output_cc1 ( cc_in, lnx_max, nday1, ltab, first, 
+ last, header )
+
+ implicit none 
+
+ integer nday1, first, last
+ real *8 ltab(nday:,2), lnx_max, cc_in
+ character *200 header, head1
+
+ integer sumi, i, itrim, lim(2), i1, iloop
+
+ real *8 xvk(nday:), yvk(nday:), Ytr8(nday:), slopes(10)
+
+ real *8 lnx, cc, cc_from_lnx
+ 
+! debug:(cc_in,lnx_max,first, last | 'Zt1 ',2f9.4,2i5)
+
+ lnx = lnx_max
+
+ do i = 1, nday1 { xvk(i) = -1; yvk(i) = 0 }
+
+ cc = cc_from_lnx ( first, last, iloop, sumi,
+        ltab, lnx, xvk, yvk )
+
+ do i = 1, nday1 { yvk(i) = yvk(i)/20.0 }  ! rescale to compensate for *20
+ do i = 2, nday1 {   ! Look for errors
+     if ( yvk(i) < yvk(i-1) && yvk(i) ~= 0 && yvk(i-1) ~= 0 ) { 
+         output i, nday1, yvk(i-1), yvk(i)
+         ('Zt_error: ',2i4,x,2f8.3)
+     }
+ }
+
+ do i = 1, nday1 { Ytr8(i) = yvk(i) }
+
+ if ( BEST_SLOPE ) { 
+     call get_best_slopeY ( xvk, Ytr8, nday1, slopes, lim )
+ }
+ i1 = 0
+ do i = 1, itrim(header) { 
+     if ( header(i:i) == " " ) next
+     i1 = i1 + 1
+     head1(i1:i1) = header(i:i)
+ }
+ output cc, sumi, head1(1:i1); ('test_Zt: cc= ',f10.7,' n= ',i4,x,a)
+
+ output head1(1:i1),(yvk(i),i=1,nday1)
+ ('Zt: ',a,x,3000f10.3)
+
+ return
+ end
+
+
+!                                                     ------------------
+!                                                    |  get_best_slopeY |
+!                                                     ------------------
+ subroutine get_best_slopeY ( xvk, yvk, nday1, slopes, lim )
+
+ implicit none 
+
+ integer nday1, first, last, lim(2)
+ real *8 xvk(nday:), yvk(nday:), slopes(10)
+ real *8 M, sumx, sumy, sumx2, sumy2, sumxy, ccR
+ real *8 intcR, slopR, TvR, x1, y1, cc1, cc1_max,
+ M_max, slope_best
+
+ integer i
+ 
+ cc1_max = 0
+ if ( .false. ) { 
+   do i = 1, nday1 { 
+     output i, xvk(i), yvk(i); 
+     ('best_slope_test: i, xvk(i), yvk(i)',i5,2(x,f10.3))
+   }
+ }
+
+ do first = 1, nday1-20 {
+     do last = first+20, nday1 { 
+         if ( last-first+1 < 20 ) next
+
+         M = 0; sumx = 0; sumy = 0; 
+         sumx2 = 0; sumy2 = 0; sumxy = 0
+
+         if ( yvk(first) > 0 ) next   ! start before zero
+         if ( yvk(last) < 0  ) next   ! end after zero
+
+         do i = first, last { 
+             x1 = xvk(i)
+             if ( x1 < 0 ) next 
+             y1 = yvk(i)
+             M = M+1
+             sumx  += x1;     sumy += y1
+             sumx2 += x1*x1; sumy2 += y1*y1
+             sumxy += x1*y1
+             !debug:(first,last,i,int(M),x1,y1|4i4,x,2f10.4)
+         }
+         if ( M < 20 ) next  
+
+         slopR = (M*sumxy - sumx*sumy)/(M*sumx2 - sumx**2)
+         intcR = (sumy * sumx2 - sumx*sumxy )/ (M*sumx2 - sumx**2)
+         ccR = (sumxy - sumx*sumy/M) /  &
+         sqrt( (sumx2 - sumx**2/M)*(sumy2 - sumy**2/M))
+         ccR = abs(ccR)
+         cc1 = ccR - 0.01/sqrt(M)
+         ! debug:(ccR,cc1,cc1_max, M|4f10.5)
+         if ( cc1_max < cc1 && M >= 20 ) {
+             cc1_max = cc1
+             M_max = M
+             slope_best = slopR
+             lim(1) = first; lim(2) = last
+             if ( .true. ) {
+               output cc1_max, ccR, first, last,
+               int(M_max),
+               slope_best, 1/slope_best
+               ( 'SSS place0 type cc=',2f12.6,' if,il= ',
+               2(1x,i3),' n= ',i3,' slope_best= ',f8.5,f8.2)
+             }
+         }
+         TvR = -intcR/slopR
+     }
+ }
+ slopes(1) = slope_best
+
+ return
+ end
+
+
+
+!                                                     -----------
+!                                                    | output_cc |
+!                                                     -----------
+ subroutine output_cc ( lnx_max, nday1, ltab, first, last )
+
+ implicit none 
+
+ integer nday1, first, last
+ real *8 ltab(nday:,2), lnx_max
+
+ integer sumi, sumi_p, i, il, ilnx, datx, datx1, indx(ilnx:)
+
+ real *8 xvk(nday:), yvk(nday:), yvb(nday:,ilnx:), ccb(ilnx:),
+ vals(ilnx:)
+
+ real *8 sumx, sumy, sumx2, sumy2, sumxy, lnx, 
+ ln_dat_minus_lnx, xv, lnx1, lnx2, dlnx,
+ xv, yv, sdx, sdy, cc
+ 
+ ! debug:(first, last | 2i5)
+
+ lnx1 = lnx_max-0.01; lnx2 = lnx_max+0.1; dlnx = 0.0001;
+ lnx1 = lnx_max-0.1; lnx2 = lnx_max+.1; dlnx = 0.001;
+ lnx1 = lnx_max-1; lnx2 = lnx_max+1; dlnx = 0.01;
+ ilnx = 0; sumi_p = 0
+ for ( lnx = lnx2; lnx >= lnx1; lnx = lnx - dlnx ) { 
+   sumx = 0;  sumy = 0; sumx2 = 0
+   sumy2 = 0; sumxy = 0; sumi = 0
+   do i = first, last {
+     if ( ltab(i,1) < 0 ) next
+     ln_dat_minus_lnx = lnx - ltab(i,1)
+     if ( ln_dat_minus_lnx <= 0 ) next
+     xv = i; yv = -log(ln_dat_minus_lnx);  ! Add minus 23Jun20 but no scale
+     xvk(i) = xv; yvk(i) = yv; 
+
+     sumi  = sumi  + 1
+     sumx  = sumx  + xv
+     sumy  = sumy  + yv
+     sumx2 = sumx2 + xv**2
+     sumy2 = sumy2 + yv**2
+     sumxy = sumxy + xv*yv
+   }
+
+   if ( sumi <= 0 ) next 
+   ilnx = ilnx + 1
+        
+   ! Get line CC
+   sumx  = sumx  / sumi; sumy  = sumy / sumi
+   sumx2 = sumx2 / sumi; sumy2 = sumy2 / sumi
+   sumxy = sumxy / sumi
+   sdx = sqrt ( abs ( sumx2-sumx**2))
+   sdy = sqrt ( abs ( sumy2-sumy**2));
+   cc = 0; 
+   if ( ( sdx*sdy) > 0 ) { cc = abs( sumxy-sumx*sumy)/(sdx*sdy) }
+
+   datx = ltab(nday1,2)
+   datx1 = ltab(last,2)
+   
+   if ( .true. ) {
+     output cc, ilnx, lnx, lnx_max, first, last, sumi, datx, 
+     datx1,sdx,sdy
+     ( 'OOO place0 type cc=',f8.5,' lnx= ',i4,2f12.8,' if,il= ',
+     2(1x,i3),' n= ',i3,' datx= ',2i8,' sdx,sdy= ',2f8.2)
+   }
+
+   ccb(ilnx) = cc
+   do i = 1, nday1 { yvb(i,ilnx) = yvk(i) }
+
+   if ( sumi < sumi_p ) { break }
+   sumi_p = sumi
+ }
+
+  debug:(ilnx|i5)
+  do il = 1, ilnx { indx(il) = il; vals(il) = -ccb(il) } 
+  call qisort ( vals, indx, ilnx )
+
+  output ilnx,(ccb(indx(il)),il=1,ilnx)
+  ('BL:   DAY=',i04,'   DAYX      lnX        X  ',3000(' CC',f7.6))
+  do i = 1, nday1 { 
+    if ( yvb(i,indx(1)) == 0 ) next
+    output i,xvk(i),ltab(i,1),int(ltab(i,2)),
+    (yvb(i,indx(il)),il=1,ilnx)
+    ('BL: ',i5,f8.0,f10.2,i8,3000f10.3)
+ }
+
+ if ( .true. ) stop
+
+ return
+ end
+
+
+
+!                                                     -----------
+!                                                    | refine_cc |
+!                                                     -----------
+ subroutine refine_cc ( ccmax, lnx_max1, nday1, ltab, 
+ first, last, xvb, yvb )
+
+ implicit none 
+
+ integer nday1, first, last
+ real *8 ltab(nday:,2)
+
+ integer sumi, i, ilnx, datx, datx1
+
+ real *8 xvk(nday:), yvk(nday:), xvb(nday:), yvb(nday:)
+
+ real *8 sumx, sumy, sumx2, sumy2, sumxy, lnx, 
+ ln_dat_minus_lnx, xv, lnx1, lnx2, dlnx, lnx_max1,
+ xv, yv, sdx, sdy, cc, ccmax, lnx_max
+ 
+ lnx_max = 0
+ lnx1 = lnx_max1-0.01; lnx2 = lnx_max1+0.01; dlnx = 0.0001;
+
+ ilnx = 0; ccmax = 0
+ for ( lnx = lnx1; lnx <= lnx2; lnx = lnx + dlnx ) { 
+   ! debug:( ilnx, lnx, cc | i5,2x,2f10.5)
+   sumx = 0;  sumy = 0; sumx2 = 0
+   sumy2 = 0; sumxy = 0; sumi = 0
+   do i = first, last {
+     if ( ltab(i,1) < 0 ) next
+     ln_dat_minus_lnx = lnx - ltab(i,1)
+     if ( ln_dat_minus_lnx <= 0 ) next
+     xv = i; yv = 20*log(ln_dat_minus_lnx);
+     xvk(i) = xv; yvk(i) = yv
+     sumi  = sumi  + 1
+     sumx  = sumx  + xv
+     sumy  = sumy  + yv
+     sumx2 = sumx2 + xv**2
+     sumy2 = sumy2 + yv**2
+     sumxy = sumxy + xv*yv
+   }
+
+   if ( sumi <= 0 ) { next }
+   ilnx = ilnx + 1
+        
+   ! Get line CC
+   sumx  = sumx  / sumi; sumy  = sumy / sumi
+   sumx2 = sumx2 / sumi; sumy2 = sumy2 / sumi
+   sumxy = sumxy / sumi
+   sdx = sqrt ( abs ( sumx2-sumx**2))
+   sdy = sqrt ( abs ( sumy2-sumy**2));
+
+   cc = 0; if ( sdx*sdy > 0 ) {cc=abs(sumxy-sumx*sumy)/(sdx*sdy)}
+
+   datx = ltab(nday1,2); datx1 = ltab(last,2)
+   
+   if ( ccmax < cc ) { 
+     ccmax = cc; lnx_max = lnx
+     do i = first, last {  xvb(i) = xvk(i); yvb(i) = yvk(i) }
+
+     if ( VERBOSE ) { 
+       output cc, ccmax, ilnx, lnx, lnx_max1, first, last, sumi, datx, 
+       int(exp(lnx)), datx1, sdx, sdy
+       ( 'DDD place0 type cc=',2f9.7,' lnx= ',i4,2f11.7,' if,il= ',
+       2(1x,i3),' n= ',i3,' datx= ',3i8,' sdx,sdy= ',2f8.2)
+     }
+
+   }
+ }
+
+ lnx_max1 = lnx_max
+
+ return
+ end
+
+
+
+!                                                     ------------
+!                                                    | get_cc_new |
+!                                                     ------------
+ subroutine get_cc_new ( ccmax, lnx_max, nday1, ltab, 
+ first, last, xvb, yvb, iloop )
+
+ implicit none 
+
+ integer nday1, first, last
+ real *8 ltab(nday:,2)
+
+ integer sumi, i, ilnx, datx, datx0, datx1, last_mx, 
+ ilevel, irepeat, iloop
+
+ real *8 xvk(nday:), yvk(nday:), xvb(nday:), yvb(nday:)
+
+ real *8 sumx, sumy, sumx2, sumy2, sumxy, lnx, 
+ ln_dat_minus_lnx, xv, ln_max, lnx1, lnx2, dlnx,
+ xv, yv, sdx, sdy, cc, ccmax, lnx_max, dcc, ccm1
+ 
+ logical past_max
+
+ ! debug:(first, last | 2i5)
+
+ ln_max = ltab(nday1,1)
+ ln_max = ltab(last,1)
+
+ if ( VERBOSE ) { 
+   output ln_max, ltab(last,2)
+   ('enter get_cc_new',f10.3,x,f10.0)
+ }
+
+ lnx1 = ln_max-4; lnx2 = ln_max+10; dlnx = 0.5;
+ ilnx = 0
+ iloop = 0
+ do ilevel = 1, 16 { 
+   if ( VERBOSE ) { debug:(ilevel|i5) }
+   ccmax = 0
+   if ( ilevel > 1 ) { 
+     if ( past_max ) { dlnx = -dlnx/2; lnx1 = lnx }
+     else { dlnx = dlnx/2 }
+   }
+   lnx = lnx1-dlnx
+
+   irepeat = 0 
+   repeat { 
+     lnx = lnx + dlnx
+
+     sumx = 0;  sumy = 0; sumx2 = 0
+     sumy2 = 0; sumxy = 0; sumi = 0
+     do i = first, last {
+       if ( ltab(i,1) < 0 ) next
+       ln_dat_minus_lnx = lnx - ltab(i,1)
+       if ( ln_dat_minus_lnx <= 0 ) next
+       xv = i; yv = -20*log(ln_dat_minus_lnx);
+       xvk(i) = xv; yvk(i) = yv; 
+
+       sumi  = sumi  + 1; sumx  = sumx  + xv
+       sumy  = sumy  + yv
+       sumx2 = sumx2 + xv**2
+       sumy2 = sumy2 + yv**2
+       sumxy = sumxy + xv*yv
+     }
+     iloop = iloop+1
+! Stop infinite loop
+     irepeat = irepeat+1;  
+     if ( VERBOSE && sumi == 0 ) { debug:(irepeat,sumi|2i5) }
+     if ( sumi == 0 && irepeat > 20 ) { 
+       if ( ilevel > 1 ) goto :END LOOP:
+       break
+     }
+
+     if ( sumi <= 0 ) { 
+       !output; ( "sumi= sumi so skip" )
+       next
+     }
+     ilnx = ilnx + 1
+        
+   ! Get line CC
+
+     sumx  = sumx  / sumi; sumy  = sumy / sumi
+     sumx2 = sumx2 / sumi; sumy2 = sumy2 / sumi
+     sumxy = sumxy / sumi
+     sdx = sqrt ( abs ( sumx2-sumx**2))
+     sdy = sqrt ( abs ( sumy2-sumy**2));
+
+     cc = 0; if ( ( sdx*sdy) > 0 ) { 
+       cc = abs( sumxy-sumx*sumy)/(sdx*sdy)
+     }
+
+
+     datx = ltab(nday1,2)
+     datx0 =int(exp(lnx))
+     datx1 = ltab(last,2)
+   
+     if ( VERBOSE ) { 
+       output ilevel, cc, ccmax, ilnx, lnx, 
+       dlnx, lnx1, first, last, last_mx, 
+       sumi, datx, datx0, datx1, sdx, sdy
+       ( 'ML bbb place0 type cc=',i4,1x,2f10.8,
+       ' lnx= ',i10, f9.2,x,f9.7,x,f9.2,
+       ' if,il,lx= ',3(1x,i3),' n= ',i3,
+       ' datx= ',3i8,' sdx,sdy= ',2f8.2)
+     }
+
+     past_max = .false.
+     if ( cc < ccmax ) { past_max = .true.; break }
+     if ( datx0 > 10*datx1 ) { break }
+
+     if ( ccmax < cc && sumi >= 7 ) {   ! this seems to be important?  Was 0, the 10, 14, 21, 12, 7  ML
+
+       ccm1 = ccmax; ccmax = cc; lnx_max = lnx
+       if ( VERBOSE ) { 
+         dcc = ccmax - ccm1
+         output ccmax, ccm1, dcc, ilnx, lnx, dlnx, lnx1, first, 
+         last, last_mx, sumi, datx, datx0, 
+         datx1, sdx, sdy
+         ( 'BBB0 place0 type cc=',3(x,f12.9),' lnx= ',i4,x,
+         f9.2,x,f10.7,x,f9.2,' if,il,lx= ',3(1x,i3),
+         ' n= ',i3,' datx= ',3(x,i15),' sdx,sdy= ',2f8.2)
+       }
+
+       do i = first, last {
+         xvb(i) = xvk(i); yvb(i) = yvk(i)
+       }
+
+       if ( ilnx > 10 && datx0 > 10*datx1 ) goto :END LOOP:
+     }
+   } ! repeat
+ }   ! do ilevel
+
+ :END LOOP: continue
+ if ( .false. ) { 
+   if ( ccm1 == 0 ) ccm1 = ccmax
+   dcc = ccmax - ccm1
+   output ccmax, ccm1, dcc, ilnx, lnx, dlnx,lnx1, first, 
+   last, last_mx, sumi, datx, int(exp(lnx_max)), 
+   datx1, sdx, sdy
+   ( 'BBB1 place0 type cc=',3(x,f12.9),' lnx= ',i4,x,
+   f9.2,x,f10.7,x,f9.2,' if,il,lx= ',3(1x,i3),
+   ' n= ',i3,' datx= ',3(x,i15),' sdx,sdy= ',2f8.2)
+ }
+ 
+ return
+ end
+
+
+!                                                     ----------
+!                                                    | get_cc_W |
+!                                                     ----------
+ subroutine get_cc_W ( ccmax, lnx_max, nday1, ltab, 
+ first, last, xvb, yvb, iloop )
+
+ implicit none 
+
+ integer nday1, first, last, iloop
+ real *8 ltab(nday:,2)
+
+ integer sumi, i, ilnx, datx, datx1, last_mx, i_min, i_max
+
+ real *8 xvk(nday:), yvk(nday:), xvb(nday:), yvb(nday:)
+
+ real *8 sumx, sumy, sumx2, sumy2, sumxy, lnx, 
+ ln_dat_minus_lnx, xv, ln_max, lnx1, lnx2, dlnx,
+ xv, yv, sdx, sdy, cc, ccmax, lnx_max, wgt, sumi8
+
+ ln_max = ltab(nday1,1)
+ lnx1 = ln_max-4; lnx2 = ln_max+2; dlnx = 0.01;
+ iloop = 0 
+ ilnx = 0; ccmax = 0; i_min = 10000; i_max = 0
+ for ( lnx = lnx1; lnx <= lnx2; lnx = lnx + dlnx ) { 
+   sumx = 0;  sumy = 0; sumx2 = 0
+   sumy2 = 0; sumxy = 0; sumi = 0; sumi8 = 0
+   do i = first, last {
+     xvk(i) = -1  ! used to signal skipped value
+     if ( ltab(i,1) < 0 ) next
+     ln_dat_minus_lnx = lnx - ltab(i,1)
+     if ( ln_dat_minus_lnx <= 0 ) next
+     if ( i_min > i ) i_min = i 
+     if ( i_max < i ) i_max = i 
+     xv = i; yv = -20*log(ln_dat_minus_lnx)  ! still SCALE BY 20.0
+     xvk(i) = xv; yvk(i) = yv
+
+! Use wgt for CC
+     wgt = sqrt(ltab(i,2))
+     sumi  = sumi  + 1
+     sumi8 = sumi8 + wgt
+     sumx  = sumx  + wgt*xv
+     sumy  = sumy  + wgt*yv
+     sumx2 = sumx2 + wgt*xv**2
+     sumy2 = sumy2 + wgt*yv**2
+     sumxy = sumxy + wgt*xv*yv
+   }
+
+   iloop = iloop+1
+   if ( sumi <= 0 ) { 
+     ! output; ( "sumi= sumi so skip" )
+     next
+   }
+   ilnx = ilnx + 1
+        
+   ! Get line CC
+
+   sumx  = sumx  / sumi8; sumy  = sumy / sumi8
+   sumx2 = sumx2 / sumi8; sumy2 = sumy2 / sumi8
+   sumxy = sumxy / sumi8
+   sdx = sqrt ( abs ( sumx2-sumx**2))
+   sdy = sqrt ( abs ( sumy2-sumy**2));
+
+   !  debug:(sdx, sdy, sumxy, sumx, sumy | 5f10.3)
+
+   cc = 0; if ( ( sdx*sdy) > 0 ) { 
+     cc = abs( sumxy-sumx*sumy)/(sdx*sdy)
+   }
+
+   datx = ltab(nday1,2)
+   datx1 = ltab(last,2)
+   
+   if ( VERBOSE && last < 15 ) { 
+       output cc, ilnx, lnx, lnx1, first, last, last_mx, sumi, datx, 
+       int(exp(lnx_max)), datx1, sdx, sdy
+       ( 'BBB place0 type cc=',f8.5,' lnx= ',i4,f9.2,f9.2,' if,il,lx= ',
+       3(1x,i3),' n= ',i3,' datx= ',3i8,' sdx,sdy= ',2f8.2)
+   }
+
+   if ( ccmax < cc && sumi >= 7 ) {   ! this seems to be important?  Was 0, the 10, 14, 21, 12, 7
+     ccmax = cc; lnx_max = lnx
+     do i = first, last {
+       xvb(i) = xvk(i); yvb(i) = yvk(i)
+     }
+   }
+ }
+
+ return
+ end
+
+!                                                     ------------
+!                                                    | cc_from_lnN |
+!                                                     ------------
+ 
+ function cc_from_lnx ( first, last, iloop, sumi, 
+ ltab, lnN, xvk, yvk )
+
+ integer first, last, iloop, sumi
+ real *8 cc_from_lnx
+ real *8 ltab(nday:,2), lnN, xvk(nday:), yvk(nday:)
+ real *8 sumx, sumy, sumx2, sumy2, sumxy, ln_dat_minus_lnx, 
+ xv, yv, cc, sdx, sdy
+
+ sumx = 0;  sumy = 0; sumx2 = 0
+ sumy2 = 0; sumxy = 0; sumi = 0
+ do i = first, last {
+   xvk(i) = -1  ! used to signal skipped value
+   if ( ltab(i,1) < 0 ) next
+   ln_dat_minus_lnx = lnN - ltab(i,1)
+   if ( ln_dat_minus_lnx <= 0 ) next
+   xv = i; yv = -20*log(ln_dat_minus_lnx)  ! still SCALE BY 20.0
+   xvk(i) = xv; yvk(i) = yv; 
+
+   sumi  = sumi  + 1
+   sumx  = sumx  + xv
+   sumy  = sumy  + yv
+   sumx2 = sumx2 + xv**2
+   sumy2 = sumy2 + yv**2
+   sumxy = sumxy + xv*yv
+ }
+
+ iloop = iloop+1
+ if ( sumi <= 0 ) { cc_from_lnx = -1.0; return }  ! signal faliure
+    
+ ! Get line CC
+ sumx  = sumx  / sumi; sumy  = sumy / sumi
+ sumx2 = sumx2 / sumi; sumy2 = sumy2 / sumi
+ sumxy = sumxy / sumi
+ sdx = sqrt ( abs ( sumx2-sumx**2))
+ sdy = sqrt ( abs ( sumy2-sumy**2))
+
+ cc = 0; if ( ( sdx*sdy) > 0 ) { 
+   cc = abs( sumxy-sumx*sumy)/(sdx*sdy)
+ }
+
+ cc_from_lnx = cc
+
+ return
+ end
+
+
+!                                                     --------
+!                                                    | get_cc |
+!                                                     --------
+ subroutine get_cc ( ccmax, lnx_max, nday1, ltab, 
+ first, last, xvb, yvb, iloop )
+
+ implicit none 
+
+ integer nday1, first, last, iloop
+ real *8 ltab(nday:,2)
+ 
+ integer sumi, i, datx, datx1, itry
+
+ real *8 cc_from_lnx
+ real *8 xvk(nday:), yvk(nday:), xvb(nday:), yvb(nday:)
+ real *8 lnx, ln_max, lnx1, lnx2, dlnx, cc, ccmax, lnx_max
+ 
+ ln_max = ltab(last,1)
+
+ lnx1 = ln_max-1; 
+ lnx2 = ln_max+2.3; dlnx = 0.8;
+! debug:(first,last,nday1,ln_max,dlnx | 3i5,2f10.5)
+
+ iloop = 0; ccmax = -10
+ do itry = 1, 12 {
+   if ( itry > 1 ) { 
+     lnx1 = lnx_max - dlnx
+     lnx2 = lnx_max + dlnx
+     dlnx = dlnx/2
+   }
+   for ( lnx = lnx1; lnx <= lnx2; lnx = lnx + dlnx ) { 
+     cc = cc_from_lnx ( first, last, iloop, sumi,
+        ltab, lnx, xvk, yvk )
+     if ( sumi < 7 ) next       ! skip is too few piints in the fit
+     if ( .false. && cc < ccmax  ) break   ! break loop when descent starts
+     datx = ltab(nday1,2)
+     datx1 = ltab(last,2)
+ 
+     if ( VERBOSE && last < 15 ) { 
+       output cc, iloop, lnx, lnx1, first, last,
+       sumi, datx, int(exp(lnx_max)), datx1
+       ( 'BBB place0 type cc=',f8.5,' lnx= ',i4,f9.2,f9.2,
+       ' if,il= ', 2(1x,i3),' n= ',i3,' datx= ',3i8)
+     }
+
+     if ( ccmax < cc && sumi >= 7 ) {   ! this seems to be important?  Was 0, the 10, 14, 21, 12, 7
+       ccmax = cc; lnx_max = lnx
+       do i = first, last {
+         xvb(i) = xvk(i); yvb(i) = yvk(i)
+       }
+     }
+   }
+ } 
+
+ if ( .false. ) { 
+   debug:(iloop,sumi,cc,lnx_max,lnx1,lnx2,dlnx|2i5,f12.8,4f12.8)
+ }
+
+ return
+ end
+
+
+!                                                     -----------------
+!                                                    | read_data_table |
+!                                                     -----------------
+ subroutine read_data_table ( nloc, nt, nday, tab_k, type_k, 
+ fullname, header )
+
+! read JHU data table pepared by JHU_FORTRAN.sh
+
+ implicit none
+
+ integer nloc, nt, nday
+ real tab_k(nday:,2,nloc:)
+
+ character *9  type_k(nloc:)
+ character *55 fullname(nloc:), country
+ character *10000 header
+
+ character *9  type, head(nday:), anto
+ character *55 fulnam1
+
+ integer i, k, ic
+ character *10000 line
+ real atemp(1000)
+
+ integer itrim
+
+! Read in data
+
+ nloc = 0
+ repeat {
+   read ( 5, '(a)', err=:eof:, end=:eof: ) line
+   if ( VERBOSE ) { output trim(line) ; ('READ: "',a,'"') }
+!          23456789-1234
+! 126  14 Country_Region                                          Case_Type   nCases  nDeaths  1/23/20  1/24/20  1/25/20  1/26/20  1/27/20  1/28/20  1/29/20  1/30/20  1/31/20   2/1/20   2/2/20   2/3/20   2/4/20   2/5/20   2/6/20   2/7/20   2/8/20   2/9/20  2/10/20  2/11/20  2/12/20  2/13/20  2/14/20  2/15/20  2/16/20  2/17/20  2/18/20  2/19/20  2/20/20  2/21/20  2/22/20  2/23/20  2/24/20  2/25/20  2/26/20  2/27/20  2/28/20  2/29/20   3/1/20   3/2/20   3/3/20   3/4/20   3/5/20   3/6/20   3/7/20   3/8/20   3/9/20  3/10/20  3/11/20  3/12/20  3/13/20  3/14/20  3/15/20  3/16/20  3/17/20  3/18/20  3/19/20  3/20/20  3/21/20  3/22/20  3/23/20  3/24/20  3/25/20  3/26/20  3/27/20  3/28/20  3/29/20  3/30/20  3/31/20   4/1/20   4/2/20   4/3/20   4/4/20   4/5/20   4/6/20   4/7/20   4/8/20   4/9/20  4/10/20  4/11/20  4/12/20  4/13/20  4/14/20  4/15/20  4/16/20  4/17/20  4/18/20  4/19/20  4/20/20  4/21/20  4/22/20  4/23/20  4/24/20  4/25/20  4/26/20  4/27/20  4/28/20  4/29/20  4/30/20   5/1/20   5/2/20   5/3/20   5/4/20   5/5/20   5/6/20   5/7/20   5/8/20   5/9/20  5/10/20  5/11/20  5/12/20  5/13/20  5/14/20  5/15/20  5/16/20  5/17/20  5/18/20  5/19/20  5/20/20  5/21/20  5/22/20  5/23/20  5/24/20
+! 234x 23x 23456789-123456789-123456789-123456789-123456789-12345x 23456789 23456789 23456789 23456789 23456789
+! 126  11 Afghanistan                                             Confirmed     9094      195        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        1        1        1        1        1        1        1        1        1        1        1        1        1        4        4        5        7        7        7       11       16       21       22       22       22       24       24       40       40       74       84       94      110      110      120      170      174      237      273      281      299      349      367      423      444      484      521      555      607      665      714      784      840      906      933      996     1026     1092     1176     1279     1351     1463     1531     1703     1828     1939     2171     2335     2469     2704     2894     3224     3392     3563     3778     4033     4402     4687     4963     5226     5639     6053     6402     6664     7072     7653     8145     8676     9216     9998    10582
+! 234 234  23456789-123456789-123456789-123456789-123456789-12345  23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789
+!123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-
+
+   if ( line(10:24) == 'Country_Region' ) {
+     header = line
+     read ( line, :fmth: ) nt, anto, country, (head(i),i=1,nt)
+     :fmth: format (i4,1x,a3,1x,a55,1x,a9,1x,1000a12)
+     ! output nt; ('nt= ',i8)
+     output nloc, country, nt, (head(i),i=1,6),
+     (head(i),i=nt-2,nt)
+     ('MH: ',i5,1x,a55,1x,i5,1x,a8,7x,7a8,3a8)
+
+     next
+   }
+   if ( line(1:6) == 'END   ' ) goto :eof:
+
+   read ( line, :fmtxa: ) nt, fulnam1, type, atemp 
+   :fmtxa: format ( i4, 5x, a55, 1x,a9,1x,1000f12.1 )
+   
+   if ( type == 'Confirmed' ) { ic = 1; nloc = nloc+1 }
+   if ( type == 'Deaths' )    { ic = 2 }
+
+   do k = 1, nt+2 { tab_k(k,ic,nloc) = atemp(k) }
+
+   fullname(nloc) = fulnam1
+   nday = nt-1
+   if ( .false.) { 
+     output nloc, fullname(nloc), nday, type, ic, 
+     (tab_k(i,ic,nloc),i=1,5),(tab_k(i,ic,nloc),i=nday-2,nday)
+     ('ML: ',i5,1x,a55,1x,i5,1x,a9,1x,i2,3x,10f12.1)
+   }
+   if ( .true. ) { 
+     ! nday = nt - 30   Walk data back on input 
+     ! walking data back seems fine
+     call process_data_line ( nloc, fullname(nloc), 
+     nday, type, ic, tab_k(1,ic,nloc) )
+   }
+
+
+   }
+
+ :eof: continue
+
+ output nloc; ('read_data_table has read in ',i5,' locations')
+
+ return
+ end
+
+
+!                                                     ---------
+!                                                    | ml_argv |
+!                                                     ---------
+ subroutine ml_argv ( narg, argv )
+
+ implicit none
+
+ integer   i
+
+ integer narg, argc
+ integer iargc
+ character *60 argv(20)
+
+! get the command line arguments
+
+ argc = iargc()
+! debug:(argc|i4)
+
+ if ( argc > 20 ) argc = 20
+
+ do i = 1, argc { call getarg ( i, argv(i) ) }
+ narg = argc
+
+ return
+ end
+
+
+
+%'type:'='real *8'
+!                                                           --------
+!                                                          | qisort |
+!                                                           --------
+ subroutine qisort ( a, ia, n )
+ 
+! quicksort is a very clever way to sort numbers which is based on
+!  recursive partitioning of the data
+!  this version sorts in ascending order
+! Both the numbers and their indices are sorted
+ 
+ integer n, itop, ibeg, iend, imid1, imid
+ type: a(n)
+ integer ia(n)
+ 
+ integer istack(100)
+ 
+ itop = 0
+ ibeg = 1
+ iend = n
+ 
+ :quicksort: continue
+ 
+! stack the bigger partition and repartion the smaller one
+ 
+ repeat {
+ 
+   imid1 = iend - ibeg + 1
+ 
+! if there are fewer than 16 elements, use the very quick insertion
+!  sort rather than continued partition
+ 
+   if ( imid1 <= 16 ) {
+!debug:( ibeg,iend,imid1 | ' qinsor ',3i6 )
+     call qinsor ( a(ibeg), ia(ibeg), imid1 )
+     break
+     }
+ 
+! partition the data in the interval (ibeg,iend)
+ 
+!debug:( ibeg,iend,imid1 | ' qparti ',3i6 )
+   call qparti ( a(ibeg), ia(ibeg), imid1 )
+ 
+! note, if imid1 is 1 then element refered to is ibeg
+ 
+   imid = imid1 + ibeg - 1
+ 
+! stack the bigger partition
+  
+   if ( iend - imid > imid - ibeg ) {
+     istack(itop + 1) = imid + 1
+     istack(itop + 2) = iend
+ 
+! set iend for next partition, keep ibeg as before
+ 
+     iend = imid - 1
+     }
+ 
+   else {
+     istack(itop + 1) = ibeg
+     istack(itop + 2) = imid - 1
+ 
+! set ibeg for next partition, keep iend as before
+ 
+     ibeg = imid + 1
+     }
+ 
+   !debug:( itop,istack(itop+1),istack(itop+2) | 3i6 )
+ 
+   itop = itop + 2
+ 
+   if ( ibeg >= iend ) break
+ 
+   }
+ 
+! exit when the stack is empty
+ 
+ if ( itop <= 1 ) go to :exit:
+ itop = itop - 2
+ ibeg = istack(itop+1)
+ iend = istack(itop+2)
+ !debug:( itop,ibeg,iend | 3i6 )
+ go to :quicksort:
+ 
+ :exit: continue
+ 
+ return
+ end
+!                                                            ________
+!                                                             qinsor
+!                                                            --------
+ subroutine qinsor( a, ia, n )
+ 
+! very fast sort if less than 16 values
+ 
+ integer n, j, itemp, i
+ 
+ type: a(n), temp
+ integer ia(n)
+ 
+ do j = 2, n {
+   temp = a(j)
+   itemp = ia(j)
+!   for ( i = j - 1; i > 0 && a(i) > temp; i = i - 1 ) {
+   for ( i = j - 1; i > 0; i = i - 1 ) {
+     if ( a(i) <= temp ) break
+     a(i+1) = a(i)
+     ia(i+1) = ia(i)
+     }
+ 
+   a(i+1) = temp
+   ia(i+1) = itemp
+ 
+   }
+ 
+ return
+ end
+!                                                            ________
+!                                                             qparti
+!                                                            --------
+ subroutine qparti ( a, ia, n )
+ 
+! partition set a so that element 1 to imid-1 are less than amid
+!  and elements imid+1 to n are greater than amid
+ 
+ integer n, mid, imed, ihi, ilo, iamed, itemp
+ type: a(n), amed, temp
+ integer ia(n)
+ 
+! find the median of three numbers
+ 
+ mid = ( 1 + n ) / 2
+ imed = n
+ 
+ if ( a(1) < a(mid) ) { if ( a(mid) < a(n) ) imed = mid }
+ 
+ else { if ( a(1) < a(n) ) imed = 1 }
+ 
+! make the first element the median
+ 
+ temp = a(1)   ; a(1) = a(imed)   ; a(imed) = temp
+ itemp = ia(1) ; ia(1) = ia(imed) ; ia(imed) = itemp
+ 
+! partition the data to be above and below the median value
+ 
+ ihi = n + 1
+ ilo = 1
+ amed = a(1)
+ iamed = ia(1)
+ 
+ repeat {
+ 
+   repeat { ilo = ilo + 1 ; if ( a(ilo) >= amed ) break }
+ 
+   repeat { ihi = ihi - 1 ; if ( a(ihi) <= amed ) break }
+ 
+   if ( ilo >= ihi ) break
+ 
+   temp  = a(ilo)  ; a(ilo)  = a(ihi)  ; a(ihi)  = temp
+   itemp = ia(ilo) ; ia(ilo) = ia(ihi) ; ia(ihi) = itemp
+ 
+   }
+ 
+ a(1) = a(ihi)
+ a(ihi) = amed
+ ia(1) = ia(ihi)
+ ia(ihi) = iamed
+ 
+! after the partition 1 to n-1 are le amed,
+!                                n eq amed,
+!                   n+1 to end are ge amed.
+ 
+! return the index of the partition point
+ 
+ n = ihi
+ 
+ return
+ end
+ 

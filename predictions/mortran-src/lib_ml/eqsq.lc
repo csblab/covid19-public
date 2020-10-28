@@ -1,0 +1,95 @@
+!                                                            ________
+!                                                           |  eqsq  |
+!                                                            --------
+ function eqsq ( a1, b1 )
+
+! eqsq is true if the strings match up till the end of either and
+!  without regard for their case
+
+!  a1 is a character variable
+!  b1 is a character variable
+
+ implicit none
+
+ logical eqsq
+ character *(*) a1,b1
+
+ integer * 2 uplow(255),ia2,ib2,ieos
+ integer i, lena, lenb
+
+ character * 26 alower
+ character * 26 aupper
+ character * 1 eos
+
+ logical first
+
+ data alower /'abcdefghijklmnopqrstuvwxyz'/
+ data aupper /'ABCDEFGHIJKLMNOPQRSTUVWXYZ'/
+ data eos/'_'/                       ! end of string is '_' (underline)
+ data first/.true./
+
+! set up the translation to upper case on the first entry
+
+ if ( first ) {
+   do i = 1, 255 { uplow(i) = i }
+   do i = 1, 26 {
+     uplow( ichar( alower(i:i) ) ) = ichar( aupper(i:i) )
+     }
+   first = .false.
+   }
+
+ lena = len ( a1 )
+ lenb = len ( b1 )
+
+ if ( lenb < lena ) lena = lenb
+ if ( lena <= 0 ) return
+
+ do i=1,lena {
+
+! successful match when reaching end of string a.
+
+   if( a1(i:i) == ' ' ) break
+
+! successful match when reaching end of string b, too.
+
+   if( b1(i:i) == '_' ) break
+
+   if ( a1(i:i) == b1(i:i) ) next   ! they match, so continue
+
+   ia2 = ichar( a1(i:i) )
+   if ( ia2 <= 0 || ia2 > 127 ) break
+   ia2 = uplow( ia2 )
+
+   ib2 = ichar( b1(i:i) )
+   if ( ib2 <= 0 || ib2 > 127 ) break
+   ib2 = uplow( ib2 )
+
+! they do not match
+
+   if( ia2 ~= ib2) goto :no match:
+   }
+
+! the strings match
+
+ eqsq = .true.
+
+! no equality for empty strings
+
+ if ( i == 1 ) eqsq = .false.
+ return
+
+ :no match: continue
+
+! the strings do not match
+
+ eqsq=.false.
+
+ return
+ end
+
+
+
+
+
+
+

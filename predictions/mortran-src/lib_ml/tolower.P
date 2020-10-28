@@ -1,0 +1,1 @@
+extern int tolower_(char *str, ftnlen str_len);

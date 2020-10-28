@@ -1,0 +1,16 @@
+!                                                            --------
+!                                                           | ualert |
+!                                                            --------
+ subroutine ualert(str)
+ 
+! this routine should eventually show an alert box.
+ 
+ implicit none
+ 
+ character*(*) str
+ integer itrim
+
+ output str(1:itrim(str)) ; (' ALERT: ',a)
+
+ return
+ end

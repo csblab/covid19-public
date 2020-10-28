@@ -1,0 +1,1 @@
+extern logical eqsq_(char *a1, char *b1, ftnlen a1_len, ftnlen b1_len);

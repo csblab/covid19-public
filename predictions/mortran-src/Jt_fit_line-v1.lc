@@ -1,0 +1,372 @@
+%l1
+%'nloc:'='5000';
+%'nday:'='600';
+%'nk:'='200000';
+%'ilnx:'='3000';
+
+%'BEST_SLOPE'='.true.';
+%'BEST_SLOPE'='.false.';
+
+%'VERBOSE'='.true.';
+%'VERBOSE'='.false.';
+
+%'NEW_CC'='.true.';
+%'NEW_CC'='.false.';
+
+%'WGT_CC'='.true.';
+%'WGT_CC'='.false.';
+
+!                                                       ----------------
+!                                                      |  best_fit_line |
+!                                                       ----------------
+ program best_fit_line
+ 
+! read in JHU COVID data 
+
+ implicit none
+
+ common/shared/dates, last_day
+ character *10 dates(1000)
+ integer last_day
+
+ integer nloc, nt, nday, day
+ real tab_k(2,nday:,nloc:)
+ character *5 method
+ character *9  type_k(nloc:)
+ character *10  date
+ character *55 fullname(nloc:), fnamei 
+ character *10000 header
+
+ integer narg, i
+ character *60 argv(20)
+
+ call ml_argv ( narg, argv )
+
+ method = 'last'
+ for ( i = 1; i <= narg; i = i + 1 ) { 
+   output i, argv(i) ; (i5,1x,a)
+   if ( argv(i)(1:1) == '-' ) { 
+     if ( argv(i)(2:2) == 'c' || argv(i)(2:2) == 'm' ) { 
+       i = i + 1; read(argv(i),'(a)') method; next
+     }  
+   }
+ }
+ 
+ fnamei = 'Dates_for_code.txt'
+ open ( unit = 1, name=fnamei, readonly, status='OLD')
+
+ last_day = 0
+ repeat {
+   !01/23/2020      1 
+   !123456789- 234567
+   read ( 1, '(a10,i7)', err=:eofa:, end=:eofa: ) date, day
+   dates(day) = date;
+   ! output day, dates(day); ('DATE: ',i5,1x,a)
+   if ( last_day < day ) { last_day = day }
+ }
+ :eofa: continue
+
+ close ( 1 );
+ output last_day, method; ('TEST last_day= ',i4,' method= ',a)
+
+ call read_data_table ( nloc, nt, nday, 
+ tab_k, type_k, fullname, header )
+
+ stop 
+ end
+
+!                                                     ---------------
+!                                                    | Ave_Francesco |
+!                                                     ---------------
+ subroutine Ave_Francesco ( N1, N, t, moi )
+
+ implicit none
+
+ real *8 N(nday:), N1(nday:)
+ integer t, i, moi, mo
+ real SN, Sw, Na, f,N1i
+
+ mo = moi
+ mo = 1
+ mo = -10
+ if ( mo == 1 ) { N(t) = N1(t) }
+
+! Running average
+
+ else if ( mo >= 2 ) { 
+     SN = 0; Sw = 0
+     do i=t-mo, t { 
+         if ( i < 1 ) next
+         SN = SN + N1(i)
+         Sw = Sw + 1
+     }
+     N(t) = SN/Sw
+ }
+
+! Running average with limit
+
+ else if ( mo < -2 ) { 
+     f = 1.10
+     SN = 0; Sw = 0; Na = 0
+     do i=t,t-abs(mo), -1 { 
+         if ( i < 1 ) break
+         N1i =  N1(i)
+         if ( Na > 0 && N1i > Na*f ) N1i = Na*f
+         SN = SN + N1i
+         Sw = Sw + 1
+         Na = SN/Sw
+     }
+     N(t) = SN/Sw
+ }
+
+ 
+ return 
+ end
+
+
+
+!                                                     -------------------
+!                                                    | Francesco_Predict |
+!                                                     -------------------
+ subroutine Francesco_Predict ( X, nday1, fulnam1, type )
+
+ implicit none
+
+ real *8 X(nday:), H(nday:), J(nday:), N(nday:), N1(nday:)
+ real *8 U(nday:), TM(nday:), alpha(nday:)
+ real *8 V, log_alpha		! V=-1/U
+
+ integer nday1, start, starta, stopt, t, i, itrim
+ integer  mo
+ real *8 sum_x, sum_x2, sum_y, sum_xy, n_data, eps, 
+ Nx, fra, err, Xtlim, wgt
+
+ character *9  type
+ character *10 sN, sH, sJ
+ character *55 fulnam1
+
+ do t = 1, nday1 { H(t)=0.; J(t)=0.; N(t)=0. }
+ do t = 1, nday1 { U(t)=0.; alpha(t)=0.; TM(t)=0. }
+
+ start = -1; stopt = 0       ! start is the first day for which X[i] ~=0, stop last data point
+ do t = 1, nday1 {
+     stopt++;
+     if ( start == -1 && X(t) > 0 ) { start = t }
+ }
+
+ if ( start < 0 )  {
+     output trim(fulnam1), type
+     ('return as no data for this location. ',a,x,a)
+     return
+ }
+
+! Generating H(t) and J(t), keep in mind that X(0)=0 and H(0),H(1),J(0),J(1) are not defined
+
+ Xtlim = 1
+ if ( type == "Confirmed" )  Xtlim = 10*Xtlim
+
+ eps = 0.00001
+ H(1) = 0.0
+ do t = start+1, stopt {
+     if ( t > 1 ) { H(t)=log( X(t) /( X(t-1)+eps ) +eps ) }
+     if ( H(t) > 0 ) { J(t)=log( H(t) ) } else { J(t) = -99.999 }
+
+     if ( VERBOSE ) {
+       output t, X(t-1), X(t), H(t), H(t-1)-H(t), J(t)
+       ('t: ',i4,' X(t)= ',2(x,f10.1),' H(t)= ',f10.1,
+       ' dH(t)= ',x,f10.4,' J(t)= ',x,f10.4)
+     }
+     if ( X(t) > Xtlim && starta < 0 ) starta = t 
+ }
+
+! fitting data up to day t* (at least 10 non zero points to start the fit) */
+
+ if ( starta <= 0 ) starta = 1
+ debug:(starta|i4)
+
+ do t = starta, stopt+1 {
+     n_data = 0.0; sum_y = 0.; sum_x2 = 0.
+     sum_x = 0.; sum_xy = 0.
+  
+     do i = start+1, t { 
+         if ( H(i) > 0.00000001 ) {	     ! to avoid infinite J(t)
+             wgt = sqrt(X(i))**2
+             n_data += wgt
+             sum_y  += J(i)*wgt
+             sum_x2 += i*i*wgt
+             sum_x  += i*wgt
+             sum_xy += i*J(i)*wgt
+         }
+     }
+     	
+     log_alpha = ( sum_y*sum_x2-sum_x*sum_xy) /   &
+      ( n_data*sum_x2-sum_x*sum_x)
+
+     V = ( n_data*sum_xy-sum_x*sum_y) / &
+      ( n_data * sum_x2 - sum_x*sum_x)
+
+     U(t) = -1/V
+
+     log_alpha = J(t)+t/U(t)
+     alpha(t)  = exp(log_alpha)
+     TM(t) = U(t)*log(alpha(t)*U(t))
+     if ( VERBOSE ) {
+       debug:(t, int(n_data), alpha(t), U(t), TM(t) | 2i3,x,4f10.3)
+     }
+
+     N1(t) = X(t) * exp(alpha(t)*U(t)*exp(-t/U(t)))
+
+     call ave_Francesco(N1,N,t,mo)
+
+     if ( N(t) < X(t) ) N(t) = X(t)  ! Limit N(t) to be >= X(t)
+
+ }
+     Nx = X(nday1)
+!GNU:   t     X(t)          Ht      J(t)       N(t)          N(t)     U(t)   alpha(t)      TM(t)     Loc  Type         Frac      Err
+!GNU:  74     1581.0     .0927   -2.3782     9636.8  .96368E+04     19.494      4.128     85.540 Germany Deaths       17.40     6.09
+
+     output trim(fulnam1), type
+     ('Jt:t,X(t),N(t),U(t),T(t),',a,',',a)
+
+
+     do t = 1, stopt {
+         if ( N(t) < 1 ) N(t) = 1
+         if ( N(t)<2*X(nday1) ) {  
+             write(sN,'(f10.1)')N(t)} else {sN = ' - ' }
+
+         if (H(t)>0.000001) {
+             write( sH,'(f10.4)' ) H(t)
+             write( sJ,'(f10.4)' ) J(t)
+         } else { sH = ' - '; sJ = ' - ' }
+
+         if ( Nx > 0 ) { 
+             fra = 100*X(t)/Nx    
+             err = 100*abs(N(t)-Nx)/Nx
+         }
+         output t, int(X(t)),int(N(t)), U(t), TM(t), 
+         trim(fulnam1), type
+         ('Jt: ',i3,x,i10,x,i10,x,f8.2,x,f6.1,x,a,x,a)
+     }
+
+ return
+ end
+
+
+!                                                     -------------------
+!                                                    | process_data_line |
+!                                                     -------------------
+
+ subroutine process_data_line ( nloc, fulnam1, 
+ nday, type, ic, tab1 )
+
+! read JHU data table pepared by JHU_FORTRAN.sh
+
+ implicit none
+
+ common/shared/dates, last_day
+ character *10 dates(1000)
+ integer last_day
+
+ integer nloc, nday, ic
+
+ real tab1(nday:)
+
+ character *9  type
+ character *55 fulnam1
+ 
+ integer i
+
+ real *8 X(nday:)
+ 
+! Test Francesco method
+ do i = 3, nday { X(i-2) = tab1(i) }
+
+ call Francesco_Predict ( X, nday-2, fulnam1, type )
+
+ return
+ end
+
+!                                                     -----------------
+!                                                    | read_data_table |
+!                                                     -----------------
+ subroutine read_data_table ( nloc, nt, nday, tab_k, type_k, 
+ fullname, header )
+
+! read JHU data table pepared by JHU_FORTRAN.sh
+
+ implicit none
+
+ integer nloc, nt, nday
+ real tab_k(nday:,2,nloc:)
+
+ character *9  type_k(nloc:)
+ character *55 fullname(nloc:), country
+ character *10000 header
+
+ character *9  type, head(nday:), anto
+ character *55 fulnam1
+
+ integer i, k, ic
+ character *10000 line
+ real atemp(1000)
+
+ integer itrim
+
+! Read in data
+
+ nloc = 0
+ repeat {
+   read ( 5, '(a)', err=:eof:, end=:eof: ) line
+   if ( VERBOSE ) { output trim(line) ; ('READ: "',a,'"') }
+!          23456789-1234
+! 126  14 Country_Region                                          Case_Type   nCases  nDeaths  1/23/20  1/24/20  1/25/20  1/26/20  1/27/20  1/28/20  1/29/20  1/30/20  1/31/20   2/1/20   2/2/20   2/3/20   2/4/20   2/5/20   2/6/20   2/7/20   2/8/20   2/9/20  2/10/20  2/11/20  2/12/20  2/13/20  2/14/20  2/15/20  2/16/20  2/17/20  2/18/20  2/19/20  2/20/20  2/21/20  2/22/20  2/23/20  2/24/20  2/25/20  2/26/20  2/27/20  2/28/20  2/29/20   3/1/20   3/2/20   3/3/20   3/4/20   3/5/20   3/6/20   3/7/20   3/8/20   3/9/20  3/10/20  3/11/20  3/12/20  3/13/20  3/14/20  3/15/20  3/16/20  3/17/20  3/18/20  3/19/20  3/20/20  3/21/20  3/22/20  3/23/20  3/24/20  3/25/20  3/26/20  3/27/20  3/28/20  3/29/20  3/30/20  3/31/20   4/1/20   4/2/20   4/3/20   4/4/20   4/5/20   4/6/20   4/7/20   4/8/20   4/9/20  4/10/20  4/11/20  4/12/20  4/13/20  4/14/20  4/15/20  4/16/20  4/17/20  4/18/20  4/19/20  4/20/20  4/21/20  4/22/20  4/23/20  4/24/20  4/25/20  4/26/20  4/27/20  4/28/20  4/29/20  4/30/20   5/1/20   5/2/20   5/3/20   5/4/20   5/5/20   5/6/20   5/7/20   5/8/20   5/9/20  5/10/20  5/11/20  5/12/20  5/13/20  5/14/20  5/15/20  5/16/20  5/17/20  5/18/20  5/19/20  5/20/20  5/21/20  5/22/20  5/23/20  5/24/20
+! 234x 23x 23456789-123456789-123456789-123456789-123456789-12345x 23456789 23456789 23456789 23456789 23456789
+! 126  11 Afghanistan                                             Confirmed     9094      195        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        0        1        1        1        1        1        1        1        1        1        1        1        1        1        4        4        5        7        7        7       11       16       21       22       22       22       24       24       40       40       74       84       94      110      110      120      170      174      237      273      281      299      349      367      423      444      484      521      555      607      665      714      784      840      906      933      996     1026     1092     1176     1279     1351     1463     1531     1703     1828     1939     2171     2335     2469     2704     2894     3224     3392     3563     3778     4033     4402     4687     4963     5226     5639     6053     6402     6664     7072     7653     8145     8676     9216     9998    10582
+! 234 234  23456789-123456789-123456789-123456789-123456789-12345  23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789 23456789
+!123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-
+
+   if ( line(10:24) == 'Country_Region' ) {
+     header = line
+     read ( line, :fmth: ) nt, anto, country, (head(i),i=1,nt)
+     :fmth: format (i4,1x,a3,1x,a55,1x,a9,1x,1000a12)
+     ! output nt; ('nt= ',i8)
+     output nloc, country, nt, (head(i),i=1,6),
+     (head(i),i=nt-2,nt)
+     ('MH: ',i5,1x,a55,1x,i5,1x,a8,7x,7a8,3a8)
+
+     next
+   }
+   if ( line(1:6) == 'END   ' ) goto :eof:
+
+   read ( line, :fmtxa: ) nt, fulnam1, type, atemp 
+   :fmtxa: format ( i4, 5x, a55, 1x,a9,1x,1000f12.1 )
+   
+   if ( type == 'Confirmed' ) { ic = 1; nloc = nloc+1 }
+   if ( type == 'Deaths' )    { ic = 2 }
+
+!   debug:(k,ic,nloc|3i6)
+   do k = 1, nt+2 { tab_k(k,ic,nloc) = atemp(k) }
+
+   fullname(nloc) = fulnam1
+   nday = nt-1
+   if ( .true.) { 
+     output nloc, fullname(nloc), nday, type, ic, 
+     (tab_k(i,ic,nloc),i=1,5),(tab_k(i,ic,nloc),i=nday-2,nday)
+     ('ML: ',i5,1x,a55,1x,i5,1x,a9,1x,i2,3x,10f12.1)
+   }
+   if ( .true. ) { 
+     ! nday = nt - 30   Walk data back on input 
+     ! walking data back seems fine
+     call process_data_line ( nloc, fullname(nloc), 
+     nday, type, ic, tab_k(1,ic,nloc) )
+   }
+
+
+   }
+
+ :eof: continue
+
+ output nloc; ('read_data_table has read in ',i5,' locations')
+
+ return
+ end

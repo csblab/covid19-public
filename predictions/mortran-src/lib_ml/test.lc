@@ -1,0 +1,43 @@
+
+ program test
+
+! test library functions
+
+ character *100 a
+ character *20 s
+
+ real * 8 rand
+
+ integer iseed, itrim
+ logical eqsq
+
+ call check_time
+
+ iseed = 11111
+
+ call srand ( iseed )
+
+ do i = 1, 10 { output i, rand() ; ( i4, f10.6 ) }
+
+ a = 'Michael Levitt'
+
+ debug:(a|a)
+ output itrim ( a ) ; ('itrim(a) = ',i4) 
+
+ if ( eqsq ( 'abcd','abc_' ) ) { 
+   output 'abcd','abc_' ; ('"',a,'" "',a,'"')
+   }
+
+ s = '123'
+ output s, tonumber(s) ; ('tonumber: "',a,'" ',f10.4)
+ s = '12.3'
+ output s, tonumber(s) ; ('tonumber: "',a,'" ',f10.4)
+ s = '  1 2.3 456789'
+ output s, tonumber(s) ; ('tonumber: "',a,'" ',f10.4)
+ 
+ stop
+ end
+
+
+
+

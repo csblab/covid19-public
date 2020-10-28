@@ -1,0 +1,20 @@
+!                                                            ---------
+!                                                           | tolower |
+!                                                            ---------
+ subroutine tolower(str)
+ 
+! convert str to lower case
+ 
+ implicit none
+ 
+ character*(*) str
+ integer k, l
+ 
+ do k = 1, len(str) {
+   l = ichar( str(k:k) )
+   if ( l >= ichar('A') && l <= ichar('Z') ) &
+   str(k:k) = char( l + 32 )
+   }
+ 
+ return
+ end

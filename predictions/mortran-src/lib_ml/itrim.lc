@@ -1,0 +1,18 @@
+!                                                            ________
+!                                                           |  itrim |
+!                                                            --------
+ integer function itrim(line)
+ 
+! itrim is the position last blank in the line
+ 
+ character *(*) line
+ integer ln, i, len
+ 
+ ln = len(line)
+ for ( i = ln ; i >= 1 && line(i:i) == ' ' ; i = i - 1 )
+ 
+ itrim = 1
+ if ( i >= 1 ) itrim = i
+ 
+ return
+ end

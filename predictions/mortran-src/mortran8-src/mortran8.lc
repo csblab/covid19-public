@@ -1,0 +1,1231 @@
+ %';letters:;'=';common/letter/leta,lb,lc,ld,le,lf,lg,lh,li,lj,lk,ll,
+ lm,ln,lo,lp,lq,lr,ls,lt,lu,lv,lw,lx,ly,lz,lzero,lblank,ldot,
+ llpar,lrpar,lcomma,lequal,lplus,lminus,llbrc,lrbrc,lsemi,
+ lcolon,lsquot,ldquot,lpercn,lnum,lat,lcaret,letand,lquest;'
+ 
+! attempt to convert the mortran pre-processor to mortran 10-dec-1982
+! size of program depends on limu = 500 000
+! and also mcnt = 5 000
+ 
+ integer a,b,c,d,e,f,g,h,o,p,q,r,s,t,u,v,w,x,y,z
+ dimension mm(500 000)
+ common/mem/mm
+ common/status/iq,q,ir,r,c,nc,h,mtrc,mdef,mcnt,ngen,iquo,mort,merr,
+ uptr,unit,list,indt,note
+ logical cnv
+ letters:
+
+ equivalence(lims,v),(limf,io),(limr,ic),(limq,ir)
+
+ data ic/300/,ia/400/,is/401/,g/23000/,nscn/0/,limu/ 500 000/
+ data nonff/1/,nonfn/0/,nonoi/1/,nonop/2/,nonom/3/,nonol/4/,nonow/5/
+ data nonob/6/,nonos/7/,nonoo/8/,nonou/9/,nonod/10/,nonov/11/,nonoj/12/
+ data nonog/13/,nonoq/14/,nonoe/15/
+ 
+! open the units to allow sharing and non-fortran carriage control
+ 
+ open(1,name='for001',form='formatted',status='old' ) 
+ open(2,name='for002',form='formatted',status='old' ) 
+ open(3,name='for003',form='formatted',status='old' ) 
+ open(7,name='for007',form='formatted',status='new' ) 
+ 
+ read(1,1)(mm(k),k=1,152)
+ write(6,3)(mm(k),k=1,72)
+ write(7,2)(mm(k),k=1,72)
+ 2 format('C',72a1)
+ 1 format(80a1)
+ 3 format(1x,72a1,12x,' PROCESSOR VERSION OF 17-JAN-83'/)
+ 6 format(1x,120a1)
+ lzero=mm(81)
+ leta=mm(91)
+ lb=mm(92)
+ lc=mm(93)
+ ld=mm(94)
+ le=mm(95)
+ lf=mm(96)
+ lg=mm(97)
+ lh=mm(98)
+ li=mm(99)
+ lj=mm(100)
+ lk=mm(101)
+ ll=mm(102)
+ lm=mm(103)
+ ln=mm(104)
+ lo=mm(105)
+ lp=mm(106)
+ lq=mm(107)
+ lr=mm(108)
+ ls=mm(109)
+ lt=mm(110)
+ lu=mm(111)
+ lv=mm(112)
+ lw=mm(113)
+ lx=mm(114)
+ ly=mm(115)
+ lz=mm(116)
+ lblank=mm(117)
+ ldot=mm(119)
+ llpar=mm(120)
+ lrpar=mm(121)
+ lcomma=mm(122)
+ lequal=mm(123)
+ lplus=mm(124)
+ lminus=mm(125)
+ llbrc=mm(130)
+ lrbrc=mm(131)
+ lsemi=mm(132)
+ lcolon=mm(133)
+ lsquot=mm(134)
+ ldquot=mm(135)
+ lpercn=mm(140)
+ lnum=mm(141)
+ lat=mm(142)
+ lcaret=mm(143)
+ letand=mm(144)
+ lquest=mm(145)
+ f=limu/8
+ io=f*5
+ ie=f*7
+ mm(ia)=ia+25
+ mm(ie)=lsemi
+ mm(ir)=0
+ lima=f
+ o=io
+ u=ie
+ s=ie
+ v=ie
+ k=f+14
+ read(1,5)kq,ka,ip,(mm(j),j=f,k)
+ 5 format(40a2)
+ j=ic
+ mm(j)=lpercn
+ mm(j+1)=f
+ mm(j+3)=0
+ mm(f)=0
+ mm(f+1)=f+12
+ mm(f+2)=f+14
+ mm(f+3)=0
+ f=f+15
+ :b: continue
+ if(c == nc)go to :m:
+ :a: continue
+ c=c+1
+ if(c > nc)call nxtcrd(lblank)
+ repeat  {
+   if(mm(c) == ldquot) {
+     repeat  {
+       c=c+1
+       if(c > nc)call nxtcrd(ldquot)
+       if(c == nc) {
+         if(iquo == 1)go to :b:
+         }
+       if(mm(c) == ldquot)go to :b:
+       }
+     }
+   u=u+1
+   if(limu <= u)u=u+nono(nonoi,nonob,nonoo,nonff)
+   mm(u)=mm(c)
+   if(mm(c) == lsquot) {
+     mm(u)=kq
+     repeat  {
+       c=c+1
+       if(c > nc)call nxtcrd(lsquot)
+       u=u+1
+       if(limu <= u)u=u+nono(nonoi,nonob,nonoo,nonff)
+       mm(u)=mm(c)
+       if(mm(c) == lsquot) {
+         c=c+1
+         if(c > nc)call nxtcrd(lsquot)
+         if(mm(c) ~= lsquot) {
+           mm(u)=kq
+           break
+           }
+         }
+       }
+     }
+   else  {
+     if(mm(c) == lblank) {
+       if(s ~= u) {
+         if(mm(u-1) == lblank)u=u-1
+         }
+       repeat  {
+         if(c == nc)go to :m:
+         c=c+1
+         if(mm(c) ~= lblank)break
+         }
+       }
+     else  {
+       if(mm(c) == lsemi)go to :m:
+       if(mm(c) == llbrc)h=h+1
+       if(mm(c) == lrbrc)h=h-1
+       go to :b:
+       }
+     }
+   }
+ :m: continue
+ if(s > u) {
+   s=ie
+   u=s-1
+   go to :a:
+   }
+ if(mm(s) == ldquot) {
+   nscn=1
+   s=s+1
+   go to :n:
+   }
+ m=ic
+ repeat  {
+   if(mm(m) == mm(s))break
+   m=m+2
+   if(mm(m+1) <= 00)go to :n:
+   }
+ m=m+1
+ :f: continue
+ m=mm(m)
+ if(m == 0)go to :n:
+ d=m+4
+ b=mm(m+1)
+ z=0
+ e=0
+ t=ia-1
+ a=mm(ia)
+ v=s
+ :c: continue
+ if(v > u) {
+   if(s == u) {
+     s=ie
+     mm(s)=mm(u)
+     u=s
+     }
+   if(mort == 0)go to :f:
+   go to :a:
+   }
+ if(mm(d) == ip) {
+   d=d+1
+   t=t+1
+   mm(t)=a
+   if(mm(d) == ka) {
+     d=d+1
+     e=n1(mm(d),0,36,0)
+     d=d+1
+     repeat  {
+       if(e <= 0)break
+       if(v > u)go to :a:
+       mm(a)=mm(v)
+       a=a+1
+       if(lima <= a)a=a+nono(nonop,nonob,nonoo,nonff)
+       v=v+1
+       e=e-1
+       }
+     }
+   else  {
+     e=d
+     w=v
+     iz=z
+     p=0
+     }
+   if(b <= d)go to :p:
+   go to :c:
+   }
+ if(mm(d) == mm(v)) {
+   if(mm(d) == kq)z=1-z
+   d=d+1
+   v=v+1
+   if(b <= d) {
+     :p: continue
+
+     if(mtrc == 2&&.true.) { 
+       output v, b, d, z, mm(d), mm(v); ('B: ',4i10,1x,2a1)
+       output (mm(jj),jj=m+4,b); ('At A:',1x,100a1)
+       }
+
+     la=t
+     mm(t+1)=a
+     mm(t+2)=0
+     e=mm(m+2)
+     b=b-1
+     s=o
+     w=mm(m+3)
+     mcnt=mcnt-1                    ! decrease the macro count?
+     if(mcnt <= 0)mtrc=3+nono(3,15,16,0)
+
+! Matched string in m+4,b
+
+     if(mm(m+4)==ichar('V') && mm(m+5)==ichar('E') ) { 
+       output (mm(jj),jj=m+4,b); ('At A:',1x,100a1)
+       }
+
+     if(mtrc == 2) { output;('At B:');call mactrc(1,m+4,b,ia,la) }
+     go to :e:
+     }
+   go to :c:
+   }
+ if(mm(v) == lblank && z == 0) {
+   v=v+1
+   go to :c:
+   }
+ if(e == 0)go to :f:
+ if(mm(t) == a && mm(w) == lblank) {
+   if(z == 0) {
+     w=w+1
+     go to :c:
+     }
+   }
+ repeat  {
+   mm(a)=mm(w)
+   a=a+1
+   if(lima <= a)a=a+nono(nonop,nonob,nonoo,nonff)
+   if(mm(w) == kq) {
+     if(z == 1 || iz == 1)go to :f:
+     repeat  {
+       w=w+1
+       mm(a)=mm(w)
+       a=a+1
+       if(lima <= a)a=a+nono(nonop,nonob,nonoo,nonff)
+       if(w > u)go to :f:
+       if(mm(w) == kq)break
+       }
+     }
+   else  {
+     if(z == 0) {
+       if(mm(w) == llpar)p=p+1
+       if(mm(w) == lrpar)p=p-1
+       if(mm(w) == llbrc)p=p+1
+       if(mm(w) == lrbrc)p=p-1
+       if(0 > p)go to :f:
+       if(mm(w) == lsemi)go to :f:
+       }
+     if(mm(w) == ka) {
+       w=w+1
+       mm(a)=mm(w)
+       a=a+1
+       }
+     }
+   w=w+1
+   if(w > u) {
+     if(mort == 0)go to :f:
+     go to :a:
+     }
+   if(p == 0) {
+     d=e
+     v=w
+     z=iz
+     go to :c:
+     }
+   }
+ :e: continue
+ b=b+1
+ if(b > e) {
+   if(w ~= 00) {
+     b=w+1
+     e=mm(b)
+     w=mm(w)
+     go to :e:
+     }
+   if(mtrc ~= 0) {
+     if(s ~= o)call mactrc(2,o+1,s,0,0)
+     }
+   repeat  {
+     if(s == o) {
+       s=v
+       go to :m:
+       }
+     v=v-1
+     mm(v)=mm(s)
+     s=s-1
+     }
+   }
+ if(mm(b) == ip) {
+   b=b+1
+   n=n1(mm(b),1,la-ia+1,1)+ia
+   a=mm(n-1)
+   n=mm(n)
+   repeat  {
+     if(n <= a)go to :e:
+     s=s+1
+     mm(s)=mm(a)
+     a=a+1
+     }
+   }
+ s=s+1
+ if(lims <= s)s=s+nono(nonoe,nonob,nonoo,nonff)
+ mm(s)=mm(b)
+ if(mm(b) == ka) {
+   b=b+1
+   if(mm(b) == lc) {
+     b=b+1
+     s=s-1
+     if(mm(b) == ln) {
+       if(ngen == 0) {
+         kgen=1
+         ngen=1
+         }
+       else  {
+         kgen=kgen+1
+         }
+       go to :e:
+       }
+     if(mm(b) == lg) {
+       if(ngen == 1)kgen=kgen+1
+       go to :e:
+       }
+     if(mm(b) == le) {
+       kgen=kgen-1
+       if(kgen <= 0)ngen=0
+       go to :e:
+       }
+     }
+   if(ngen == 1) {
+     s=s-1
+     go to :e:
+     }
+   if(mm(b) == li) {
+     b=b+1
+     s=s-1
+     if(mm(b) == lplus) {
+       knt=knt+1
+       go to :e:
+       }
+     if(mm(b) == lminus) {
+       knt=knt-1
+       go to :e:
+       }
+     if(mm(b) == lzero) {
+       knt=0
+       go to :e:
+       }
+     if(mm(b) == lequal) {
+       knt=mm(s)
+       s=s-2
+       go to :e:
+       }
+     if(mm(b) == lc) {
+       s=s+2
+       mm(s)=knt
+       go to :e:
+       }
+     }
+   if(mm(b) == lm) {
+     b=b+1
+     if(mm(b) == ls) {
+       s=s-1
+       b=b+1
+       q=q+1
+       if(limq <= q)q=q+nono(nonom,nonos,nonoo,nonfn)
+       mm(q)=mm(b)
+       go to :e:
+       }
+     if(mm(b) == lr) {
+       s=s-1
+       b=b+1
+       mm(q)=mm(b)
+       go to :e:
+       }
+     if(mm(b) == lu) {
+       mm(s)=lat
+       s=s+1
+       if(q == iq)q=q-nono(nonom,nonos,nonou,nonfn)
+       mm(s)=mm(q)
+       q=q-1
+       go to :e:
+       }
+     if(mm(b) == lt) {
+       if(mtrc == 1)call mactrc(1,m+4,mm(m+1)-1,ia,la)
+       s=s-1
+       go to :e:
+       }
+     if(mm(b) == lg) {
+       icat=0
+       go to :g:
+       }
+     if(mm(b) == lc) {
+       icat=1
+       go to :g:
+       }
+     if(mm(b) == lm) {
+       j=mm(ia)
+       k=mm(is)-1
+       write(6,6)(mm(jj),jj= j,k)
+       s=s-1
+       go to :e:
+       }
+     }
+   if(mm(b) == ll) {
+     b=b+1
+     if(mm(b) == lg) {
+       g=g+10
+       s=s+1
+       mm(s)=g
+       go to :e:
+       }
+     j=n1(mm(b+1),0,9,0)
+     if(mm(b) == lc) {
+       s=s+1
+       k=r-j
+       mm(s)=mm(k)+n1(mm(b+2),0,9,0)
+       b=b+2
+       go to :e:
+       }
+     if(mm(b) == ls) {
+       r=r+1
+       if(limr <= r)r=r+nono(nonol,nonos,nonoo,nonfn)
+       if(j ~= 0) {
+         do k=1,j {
+           kk=r-k
+           mm(kk+1)=mm(kk)
+           }
+         }
+       k=r-j
+       mm(k)=mm(s-1)
+       b=b+1
+       s=s-3
+       go to :e:
+       }
+     if(mm(b) == lu) {
+       k=r-ir
+       if(j > k)j=nono(nonol,nonos,nonou,nonfn)
+       if(j > 0) {
+         do k=1,j {
+           kk=r-j+k
+           mm(kk-1)=mm(kk)
+           }
+         }
+       if(0 <= j)r=r-1
+       b=b+1
+       s=s-1
+       go to :e:
+       }
+     }
+   b=b-1
+   }
+ go to :e:
+ :n: continue
+ repeat  {
+   if(mm(s) == lsemi) {
+     if(o ~= io)call outlin(io,o)
+     }
+   else  {
+     if(mm(s) == ka || mm(s) == kq) {
+       z=0
+       repeat  {
+         if(mm(s) == ka) {
+           s=s+1
+           call ncv(o,mm(s))
+           if(z == 0)break
+           }
+         else  {
+           
+! output a quoted string
+           
+           if(mm(s) == kq || s > u) {
+             if(z == 0) {
+               z=o
+               
+! start of a quote string
+               
+               if(ngen == 0) {
+                 mm(o)=lsquot ; o=o+1
+!                o=o+6
+!                mm(o-1)=lh
+                 }
+               }
+             
+! end of the quoted string
+             
+             else  {
+               if (ngen == 0) { mm(o)=lsquot ; o=o+1 }
+!              call ncv(z,o-z-6)
+               break
+               }
+             }
+           else  {
+             if(ngen == 0) {
+               mm(o)=mm(s)
+               o=o+1
+               }
+             }
+           }
+         s=s+1
+         }
+       }
+     else  {
+       if(mm(s) == ldquot) {
+         nscn=0
+         s=s+1
+         go to :m:
+         }
+       if(ngen == 0) {
+         if(mm(s) ~= lblank || o ~= io) {
+           mm(o)=mm(s)
+           o=o+1
+           }
+         }
+       }
+     }
+   s=s+1
+   if(nscn == 0)go to :m:
+   if(s > u)go to :m:
+   }
+ :g: continue
+ t=ia
+ s=s-1
+ if(mm(t+1) == mm(t)) {
+   i=nono(nonoj,nonom,nonoq,nonfn)
+   go to :e:
+   }
+ repeat  {
+   a=mm(t)
+   t=t+1
+   n=a-1
+   z=0
+   repeat  {
+     if(mm(t) <= a)break
+     if(mm(a) == lsquot) {
+       if(z == 0) {
+         mm(a)=kq
+         z=1
+         }
+       else  {
+         a=a+1
+         if(mm(a) ~= lsquot || mm(t) <= a) {
+           a=a-1
+           mm(a)=kq
+           z=0
+           }
+         }
+       }
+     else  {
+       if(mm(a) == lnum) { if(mm(a+1) == lnum) { a=a+1
+           }
+         else  {
+           mm(a)=ip
+           }
+         }
+       else  {
+         if(mm(a) == lat) {
+           if(mm(a+1) == lat) {
+             a=a+1
+             }
+           else  {
+             mm(a)=ka
+             }
+           }
+         }
+       }
+     n=n+1
+     mm(n)=mm(a)
+     if(mm(a) ~= lblank || z == 1) {
+       a=a+1
+       }
+     else  {
+       repeat  {
+         a=a+1
+         if(mm(t) <= a || mm(a) ~= lblank)break
+         }
+       }
+     }
+   if(t == is) {
+     i1=n
+     }
+   else  {
+     i2=n
+     break
+     }
+   }
+ if(icat == 0) {
+   :i: continue
+   n=f
+   f=f+4
+   a=mm(ia)
+   repeat  {
+     if(a > i1)break
+     mm(f)=mm(a)
+     f=f+1
+     if(limf <= f)f=f+nono(nonom,nonob,nonoo,nonff)
+     a=a+1
+     }
+   mm(n+1)=f
+   a=mm(is)
+   repeat  {
+     if(a > i2)break
+     mm(f)=mm(a)
+     f=f+1
+     if(limf <= f)f=f+nono(nonom,nonob,nonoo,nonff)
+     a=a+1
+     }
+   mm(n+2)=f-1
+   mm(n+3)=0
+   t=ic
+   a=mm(ia)
+   repeat  {
+     if(mm(a) == mm(t)) {
+       mm(n)=mm(t+1)
+       break
+       }
+     t=t+2
+     if(mm(t+1) <= 00) {
+       mm(t)=mm(a)
+       mm(t+3)=0
+       mm(n)=0
+       break
+       }
+     }
+   mm(t+1)=n
+   t=3
+   }
+ else  {
+   t=ic
+   a=mm(ia)
+   repeat  {
+     if(mm(t) == mm(a))break
+     t=t+2
+     if(mm(t+1) == 00)go to :i:
+     }
+   t=mm(t+1)
+   n=t
+   repeat  {
+     t=n+4
+     a=mm(ia)
+     repeat  {
+       if(mm(t) ~= mm(a))break
+       t=t+1
+       a=a+1
+       if(a > i1)go to :j:
+       }
+     n=mm(n)
+     if(n == 0)go to :i:
+     }
+   :j: continue
+   t=n+3
+   repeat  {
+     if(mm(t) ~= 00) {
+       t=mm(t)
+       }
+     else  {
+       mm(t)=f
+       break
+       }
+     }
+   a=mm(is)
+   mm(f)=0
+   n=f+1
+   f=f+2
+   repeat  {
+     if(a > i2)break
+     mm(f)=mm(a)
+     f=f+1
+     if(limf <= f)f=f+nono(nonom,nonob,nonoo,nonff)
+     a=a+1
+     }
+   mm(n)=f-1
+   t=4
+   }
+ if(mdef > 0)call mactrc(t,mm(ia),i1,mm(is),i2)
+ go to :e:
+ end
+ blockdata
+ integer a,b,c,d,e,f,g,h,o,p,q,r,s,t,u,v,w,x,y,z
+ common/status/iq,q,ir,r,c,nc,h,mtrc,mdef,mcnt,ngen,iquo,mort,merr,
+ uptr,unit,list,indt,note
+ integer unit,uptr
+ data iq/200/,q/200/,ir/250/,r/250/,c/80/,nc/72/,h/0/,mtrc/0/,
+ mdef/0/,mcnt/5 000/,ngen/0/,iquo/0/,mort/1/,merr/0/,uptr/1/,unit/1/,
+ list/0/,indt/0/,note/0/
+ end
+!                                                            ________
+!                                                             mactrc
+!                                                            --------
+ subroutine mactrc(w,i,j,k,l)
+ integer a,b,c,d,e,f,g,h,o,p,q,r,s,t,u,v,w,x,y,z
+ dimension mm(500 000)
+ common/mem/mm
+ goto(:a:, :b:, :c:, :d:),w
+ :a: continue
+ write(6,1)(mm(jj),jj= i,j)
+ if(k <= l) {
+   do t=k,l {
+     m=mm(t)
+     n=mm(t+1)-1
+     a=t-k+1
+     if(m <= n)write(6,2)a,(mm(jj),jj=m,n)
+     }
+   }
+ go to :r:
+ :b: continue
+ write(6,3)(mm(jj),jj= i,j)
+ go to :r:
+ :c: continue
+ write(6,4)(mm(jj),jj= i,j)
+ write(6,5)(mm(jj),jj= k,l)
+ go to :r:
+ :d: continue
+ write(6,4)(mm(jj),jj= i,j)
+ write(6,6)(mm(jj),jj= k,l)
+ :r: continue
+ return
+ 1 format(11x,'PATTERN MATCHED IS ',80a1/(30x,80a1))
+ 2 format(15x,'ARGUMENT',i3,' IS ',80a1/(30x,80a1))
+ 3 format(17x,'EXPANSION IS ',80a1/(30x,80a1))
+ 4 format(' MACRO DEFINITION, PATTERN IS ',80a1/(30x,80a1))
+ 5 format(15x,'REPLACEMENT IS ',80a1/(30x,80a1))
+ 6 format(9x,'CATENATION STRING IS ',80a1/(30x,80a1))
+ end
+!                                                            ________
+!                                                             nxtcrd
+!                                                            --------
+ subroutine nxtcrd(m)
+ integer a,b,c,d,e,f,g,h,o,p,q,r,s,t,u,v,w,x,y,z
+ dimension mm(500 000)
+ common/mem/mm
+ common/status/iq,q,ir,r,c,nc,h,mtrc,mdef,mcnt,ngen,iquo,mort,merr,
+ uptr,unit,list,indt,note
+ logical cnv
+ integer ustk,uptr,unit
+ dimension ustk(20),i80(80),i79(79)
+ equivalence(mm(1),i79(1),i80(1)),(mm(180),ustk(1))
+ letters:
+ if ( uptr == 0 ) {
+   if( q ~= iq ) {
+     merr = merr + 1
+     output ; (' ******** ERROR - UNCLOSED LOOP OR BLOCK')
+     }
+   if ( r ~= ir ) {
+     merr = merr + 1
+     output ; (' ******** ERROR - MISSING RIGHT BRACKET')
+     }
+   if ( m == lsquot ) {
+     merr = merr + 1
+     output ; (' ******** ERROR - UNCLOSED STRING')
+     }
+   if ( m == ldquot ) {
+     merr = merr + 1
+     output ; (' ******** ERROR - UNCLOSED COMMENT')
+     }
+   output merr ; (i5,' MORTRAN ERRORS ENCOUNTERED (ML 3Feb02)')
+   if ( merr == 0 ) stop
+   write ( 7 , :fmt7:)
+   :fmt7: format(6x,'****** MORTRAN ERROR(S), CHECK LISTING'/6x,'END')
+   stop 12
+   }
+ 
+ :r: continue
+ 
+ 1034 read ( unit, :fmt:, end=:eof:) i80
+ :fmt: format(80a1)
+
+ for ( i = 1 ; i <= 80 && i80(i) ~= ldquot ; i = i + 1 )
+
+! if there is no comment (i == 81) or the comment starts after column 72
+! test for lost characters
+
+ if ( i > 72 ) { 
+   do i = 73, 80 { 
+     if ( i80(i) == lblank ) next
+     output i80
+     ('**** Error. Line too long:',/,80a1)
+     break
+     }
+   }
+ 
+ if ( mort == 0 ) go to :skip fix:
+ 
+! ifirst is the first non-blank character in the line
+ 
+ for ( i = 1 ; i <= 72 && i80(i) == lblank ; i = i + 1 )
+ 
+! skip blank lines
+ 
+ if ( i > 72 ) go to :skip fix:
+ 
+ ifirst = i80(i)
+ 
+ if ( ifirst == lpercn ) go to :skip fix:
+ 
+! ilast is the last non-blank character in the line
+! i1lst is its position in the line
+ 
+ for ( i = 72 ; i >= 1 && i80(i) == lblank ; i = i - 1 )
+ 
+! skip blank lines
+ 
+ if ( i < 1 ) go to :skip fix:
+ 
+ ilast = i80(i)
+ i1lst = i
+ 
+! if the line contains a comment, then set ilast to be the last non-
+!  blank before the start of the comment
+ 
+ for ( i = 1 ; i <= 72 && i80(i) ~= ldquot ; i = i + 1 )
+ 
+! the line contains ldquot
+ 
+ if ( i80(i) == ldquot ) {
+   
+! skip if the ldquot is in position 1
+   
+   if ( i == 1 ) go to :skip fix:
+   
+! if the position preceeding ldquot is blank,
+!  then skip back to find the last non-blank
+   
+   if ( i80(i-1) == lblank ) {
+     
+     for ( i = i - 1 ; i >= 1 && i80(i) == lblank ; i = i - 1 )
+     
+     if ( i > 0 ) ilast = i80(i)
+     i1lst = i
+     }
+   
+! otherwise take the preceding position as ilast and insert a
+!  single blank
+   
+   else {
+     ilast = i80(i-1)
+     i1lst0 = i1lst
+     i1lst = i - 1
+     for ( i = i1lst0 ; i > i1lst ; i = i - 1) { i80(i+1) = i80(i) }
+     }
+   }
+ 
+! if the last character is a right brace, then find the last
+!  non-blank character starting before the lrbrc
+! change x } to x; } under same conditions  ({{)
+ 
+ if ( ilast == lrbrc ) {
+   
+! look for the first character before the right brace that is
+!  not blank and not a right-brace
+   
+   for ( i = i - 1 ;   &
+   i >= 1 && ( i80(i) == lblank || i80(i) == lrbrc ) ; i = i - 1 )
+   
+   if ( i > 1 ) {
+     ilast = i80(i)
+     i1lst0 = i1lst
+     i1lst = i
+     
+! ' } ' becomes ';};'  ({{)
+     
+     i80(i1lst0+2) = lsemi
+     
+! move line 1 to right after last non-blank and non-right-brace
+     
+     for ( i = i1lst0 ; i > i1lst ; i = i - 1) { i80(i+1) = i80(i) }
+     }
+   }
+ 
+! swallow last & as continuation symbol
+ 
+ if ( ilast == letand ) {
+   i80(i1lst) = lblank
+   go to :skip fix:
+   }
+ 
+! add lsemi to end of input lines unless:
+!   first character is lpercn
+!   last character is
+!                     lcomma
+!                     llbrc
+!                     lrbrc
+!                     lsemi
+!                     ldquot
+ 
+ if ( ilast == lcomma ) go to :skip fix:
+ if ( ilast == llbrc || ilast == lrbrc) go to :skip fix:
+ if ( ilast == lsemi || ilast == ldquot ) go to :skip fix:
+ 
+ if ( i1lst.lt.72 ) i80(i1lst+1) = lsemi
+ 
+ go to :skip fix:
+ 
+! on end of file make last card '%%'   (% is lpercn)
+ 
+ :eof: continue
+ i80(1) = lpercn
+ i80(2) = lpercn
+ do i = 3, 72 { i80(i) = lblank }
+ 
+ :skip fix: continue
+ 
+ if ( list ~= 0 ) {
+   if ( mort == 0 || mm(1) == lpercn ) {
+     output i80 ; (9x,80a1)
+     }
+   else  {
+     k = max0(indt*h+1,1)
+     l = 1
+     if ( indt ~= 0 ) {
+       repeat {
+         if ( mm(l) ~= lblank ) break
+         l = l + 1
+         if ( nc <= l ) {
+           l = 1
+           break
+           }
+         }
+       }
+     
+     igen = lblank
+     if ( ngen ~= 0 )igen = lx
+     write(6,3)igen,m,h,(lblank,i=1,k),(mm(i),i=l,80)
+     3 format(1x,2a1,i3,2x,3(124a1/7x))
+     }
+   
+   }
+ 
+ if ( mort == 0 ) {
+   if ( mm(1) ~= lpercn ) {
+     write ( 7, :fmtin: ) i80
+     :fmtin: format(80a1)
+     }
+   }
+ 
+ else  {
+   
+   if ( note == 1 ) {
+     write ( 7, :fmtc: ) i79
+     if ( mm(80) ~= lblank ) write ( 7, :fmtc:) mm(80)
+     :fmtc: format('C',79a1)
+     }
+   
+   if(note == 2) {
+     write ( 7, :fmtc1: )i80
+     :fmtc1: format('C',39x,40a1)
+     }
+   }
+ 
+ if ( mm(1) == lpercn ) {
+   if ( mm(2) == lq ) {
+     iquo = n2 ( 0, 1, 0 )
+     go to :r:
+     }
+   if(mm(2) == lt) {
+     mtrc=n2(0,2,0)
+     go to :r:
+     }
+   if(mm(2) == ld) {
+     mdef=n2(0,2,0)
+     go to :r:
+     }
+   if(mm(2) == le) {
+     write(6,6)
+     6 format(1h1)
+     go to :r:
+     }
+   if(mm(2) == ll) {
+     list=1
+     go to :r:
+     }
+   if(mm(2) == ln) {
+     list=0
+     go to :r:
+     }
+   if(mm(2) == lf)go to :q:
+   if(mm(2) == lm) {
+     mort=1
+     c=nc
+     mm(c)=lsemi
+     return
+     }
+   if(mm(2) == li) {
+     indt=n2(0,50,2)
+     go to :r:
+     }
+   if(mm(2) == leta) {
+     note=n2(0,2,1)
+     go to :r:
+     }
+   if(mm(2) == lc) {
+     nc=n2(10,80,72)
+     go to :r:
+     }
+   if(mm(2) == lu) {
+     ustk(uptr)=unit
+     uptr=uptr+1
+     unit=n2(1,99,unit)
+     go to :r:
+     }
+   if(mm(2) == lpercn) {
+     uptr=uptr-1
+     if(uptr ~= 0) {
+       unit=ustk(uptr)
+       go to :r:
+       }
+     :q: continue
+     mort=0
+     c=nc-1
+     mm(c)=lsemi
+     mm(nc)=lsemi
+     return
+     }
+   }
+ if(mort == 0)go to :r:
+ c=1
+ return
+ end
+!                                                            ________
+!                                                             outlin
+!                                                            --------
+ subroutine outlin(a,z)
+ integer a,b,c,d,e,f,g,h,o,p,q,r,s,t,u,v,w,x,y,z
+ dimension mm(500 000)
+ common/mem/mm
+ common/status/iq,q,ir,r,c,nc,h,mtrc,mdef,mcnt,ngen,iquo,mort,merr,
+ uptr,unit,list,indt,note
+ logical cnv
+ dimension l(5)
+ letters:
+ mcnt=500
+ if(ngen ~= 0)return
+ i=1
+ b=a
+ y=z-1
+ do j=1,5 {
+   l(j)=lblank
+   }
+ repeat  {
+   if(mm(b) ~= lblank) {
+     if(cnv(mm(b),j,0,9))break
+     l(i)=mm(b)
+     i=i+1
+     }
+   b=b+1
+   if(i > 5 || b > y)break
+   }
+ write(7,1)l,(mm(j),j=b,y)
+ z=a
+ return
+ 1 format(5a1,1x,66a1/(5x,'&',66a1))
+ end
+!                                                            ________
+!                                                               ncv
+!                                                            --------
+ subroutine ncv(p,n)
+ integer a,b,c,d,e,f,g,h,o,p,q,r,s,t,u,v,w,x,y,z
+ dimension mm(500 000)
+ common/mem/mm
+ common/status/iq,q,ir,r,c,nc,h,mtrc,mdef,mcnt,ngen,iquo,mort,merr,
+ uptr,unit,list,indt,note
+ letters:
+ if(ngen ~= 0)return
+ i=n
+ p=p+5
+ do j=1,5 {
+   k=p-j
+   mm(k)=lblank
+   t=i/10
+   if(i ~= 0 || j == 1) {
+     i=i-t*10+81
+     mm(k)=mm(i)
+     }
+   i=t
+   }
+ return
+ end
+ logical function cnv(i,o,l,m)
+ integer a,b,c,d,e,f,g,h,o,p,q,r,s,t,u,v,w,x,y,z
+ dimension mm(500 000)
+ common/mem/mm
+ cnv=.true.
+ if(l > m)return
+ kl=l+81
+ km=m+81
+ do k=kl,km {
+   if(mm(k) == i) {
+     o=k-81
+     cnv=.false.
+     go to :r:
+     }
+   }
+ :r: continue
+ return
+ end
+!                                                            ________
+!                                                               n1
+!                                                            --------
+ function n1(i,l,m,k)
+ integer a,b,c,d,e,f,g,h,o,p,q,r,s,t,u,v,w,x,y,z
+ dimension mm(500 000)
+ common/mem/mm
+ common/status/iq,q,ir,r,c,nc,h,mtrc,mdef,mcnt,ngen,iquo,mort,merr,
+ uptr,unit,list,indt,note
+ logical cnv
+ n1=k
+ n=k
+ if(cnv(i,n,l,m))go to :e:
+ n1=n
+ return
+ :e: continue
+ merr=merr+1
+ write(6,1)i
+ return
+ 1 format(' ******** ERROR - BAD PARAMETER NUMBER',1x,a2)
+ end
+!                                                            ________
+!                                                               n2
+!                                                            --------
+ function n2(l,m,k)
+ integer a,b,c,d,e,f,g,h,o,p,q,r,s,t,u,v,w,x,y,z
+ dimension mm(500 000)
+ common/mem/mm
+ common/status/iq,q,ir,r,c,nc,h,mtrc,mdef,mcnt,ngen,iquo,mort,merr,
+ uptr,unit,list,indt,note
+ letters:
+ logical cnv
+ n2=-1
+ if(mm(3) ~= lblank) {
+   if(cnv(mm(3),n1,0,9))go to :e:
+   n2=n1
+   }
+ if(mm(4) ~= lblank) {
+   if(cnv(mm(4),n1,0,9))go to :e:
+   n2=10*n2+n1
+   }
+ if(l <= n2 && n2 <= m)go to :r:
+ :e: continue
+ n2=k
+ write(6,1)k
+ 1 format(' ******** ERROR - BAD NUMERICS ON CONTROL CARD',i3,
+ ' ASSUMED')
+ merr=merr+1
+ :r: continue
+ return
+ end
+!                                                            ________
+!                                                              nono
+!                                                            --------
+ function nono(i,j,k,l)
+ integer a,b,c,d,e,f,g,h,o,p,q,r,s,t,u,v,w,x,y,z
+ dimension mm(500 000)
+ common/mem/mm
+ common/status/iq,q,ir,r,c,nc,h,mtrc,mdef,mcnt,ngen,iquo,mort,merr,
+ uptr,unit,list,indt,note
+ dimension a(64)
+ data a(01),a(02),a(03),a(04)/'IN','PU','T ','  '/,
+ a(05),a(06),a(07),a(08)/'PA','RA','MT','ER'/,
+ a(09),a(10),a(11),a(12)/'MA','CR','O ','  '/,
+ a(13),a(14),a(15),a(16)/'LA','BE','L ','  '/,
+ a(17),a(18),a(19),a(20)/'OU','TP','UT','  '/,
+ a(21),a(22),a(23),a(24)/'BU','FF','ER','  '/,
+ a(25),a(26),a(27),a(28)/'ST','AC','K ','  '/,
+ a(29),a(30),a(31),a(32)/'OV','ER','FL','OW'/,
+ a(33),a(34),a(35),a(36)/'UN','DR','FL','OW'/,
+ a(37),a(38),a(39),a(40)/'DI','GI','T ','  '/,
+ a(41),a(42),a(43),a(44)/'UN','DE','FI','ND'/,
+ a(45),a(46),a(47),a(48)/'IL','LE','GA','L '/,
+ a(49),a(50),a(51),a(52)/'ST','RI','NG','  '/,
+ a(53),a(54),a(55),a(56)/'PA','TT','ER','N '/,
+ a(57),a(58),a(59),a(60)/'EX','PN','SI','N '/,
+ a(61),a(62),a(63),a(64)/'LO','OP','  ','  '/
+ 
+ write(6,1)a(4*i-3),a(4*i-2),a(4*i-1),a(4*i),a(4*j-3),a(4*j-2),
+ a(4*j-1),a(4*j),a(4*k-3),a(4*k-2),a(4*k-1),a(4*k)
+ nono=-1
+ if(l ~= 0)stop16
+ merr=merr+1
+ write(6,2)
+ return
+ 1 format(' ******** ERROR - ',3(1x,4a2))
+ 2 format(' MORTRAN PROCESSING CONTINUING')
+ end

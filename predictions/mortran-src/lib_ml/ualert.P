@@ -1,0 +1,2 @@
+extern int ualert_(char *str, ftnlen str_len);
+/*:ref: itrim_ 4 2 13 124 */

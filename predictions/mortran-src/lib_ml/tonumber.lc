@@ -1,0 +1,30 @@
+!                                                            ----------
+!                                                           | tonumber |
+!                                                            ----------
+ real function tonumber(str)
+ 
+! convert str to a number
+ 
+ implicit none
+ 
+ character*(*) str
+ integer k, i1
+ real d10, value
+ logical before_point
+ before_point = .true.
+ 
+ value = 0.0
+ do k = 1, len(str) {
+   if ( str(k:k) == ' ' ) next
+   if ( str(k:k) == '.' ) { before_point = .false. ; d10 = 0.1 }
+   i1 = index ( '0123456789', str(k:k) ) 
+   if ( i1 <= 0 ) next
+ 
+   if ( before_point ) { value = value*10 + (i1-1) }
+   else { value = value + (i1-1)*d10 ; d10 = d10 * 0.1 }
+   }
+
+ tonumber = value
+
+ return
+ end

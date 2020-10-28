@@ -1,0 +1,17 @@
+# Compilation artifacts
+*.o
+_.*.f
+_.*.c
+_.*.P
+*.exe
+*.a
+
+# Notebooks
+.ipynb_checkpoints/
+__pycache__
+**/.ipynb_checkpoints/
+**/__pycache__/
+**/*.pdf
+**/*.csv
+**/*.png
+**/*.gz

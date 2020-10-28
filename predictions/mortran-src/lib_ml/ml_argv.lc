@@ -1,0 +1,25 @@
+!                                                             ---------
+!                                                            | ml_argv |
+!                                                             ---------
+ subroutine ml_argv ( argc, argv )
+
+! ml_argv parses the command line arguments
+
+ implicit none
+
+ integer argc
+
+%'NARG'='100'
+
+ character *60 argv(NARG)
+
+ integer   i, iargc
+
+! get the command line arguments
+
+ argc = iargc() ; if ( argc > NARG ) argc = NARG
+
+ do i = 1, argc { call getarg ( i, argv(i) ) }
+
+ return
+ end

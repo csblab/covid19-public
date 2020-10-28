@@ -1,0 +1,1 @@
+extern real tonumber_(char *str, ftnlen str_len);
