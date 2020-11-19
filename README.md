@@ -19,3 +19,6 @@ best-fit-method/
     ├── mortran-src : original MORTRAN code and compilers
     └── python : translated Python code
 ```
+
+## License
+All code and files in this repository are made available under the GNU General Public License v3.0.
